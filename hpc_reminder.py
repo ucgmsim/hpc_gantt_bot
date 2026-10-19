@@ -10,15 +10,20 @@
 """Post HPC usage reminders from the team's planning sheet to Slack."""
 
 import io
+import json
+import os
 import re
+import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import openpyxl
 import requests
+from cyclopts import App
 
 NZ = ZoneInfo("Pacific/Auckland")
 
@@ -418,3 +423,185 @@ def post_message(token: str, channel: str, text: str, thread_ts: str | None = No
     if not data.get("ok"):
         raise SlackError(f"Slack said: {data.get('error')}")
     return data["ts"]
+
+
+# ---------------------------------------------------------------- config and state
+
+
+class ConfigError(Exception):
+    """A required environment variable is missing."""
+
+
+@dataclass(frozen=True)
+class Config:
+    sheet_id: str
+    slack_token: str | None = None
+    slack_channel: str | None = None
+
+
+def load_config(env: Mapping[str, str], need_slack: bool) -> Config:
+    """Read the bot's settings from environment variables (empty counts as missing)."""
+    required = ["SHEET_ID", "SLACK_BOT_TOKEN", "SLACK_CHANNEL"] if need_slack else ["SHEET_ID"]
+    missing = [name for name in required if not env.get(name)]
+    if missing:
+        raise ConfigError(f"missing environment variables: {', '.join(missing)}")
+    return Config(env["SHEET_ID"], env.get("SLACK_BOT_TOKEN") or None, env.get("SLACK_CHANNEL") or None)
+
+
+def state_path(env: Mapping[str, str]) -> Path:
+    """Where the bot records which weeks it has posted for (systemd sets STATE_DIRECTORY)."""
+    if directory := env.get("STATE_DIRECTORY"):
+        return Path(directory) / "state.json"
+    return Path.home() / ".local/state/hpc-reminder/state.json"
+
+
+def _read_state(path: Path) -> dict:
+    try:
+        state = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def already_sent(path: Path, kind: str, monday: date) -> bool:
+    """Return True if the ``kind`` post for the week starting ``monday`` already went out."""
+    return _read_state(path).get(kind) == monday.isoformat()
+
+
+def record_sent(path: Path, kind: str, monday: date) -> None:
+    """Record that the ``kind`` post for the week starting ``monday`` went out."""
+    state = _read_state(path) | {kind: monday.isoformat()}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(state, indent=2) + "\n")
+    os.replace(temporary, path)
+
+
+# ---------------------------------------------------------------- commands
+
+
+def _fetch_schedule(config: Config, this_monday: date) -> Schedule:
+    return parse_schedule(read_workbook(download_workbook(config.sheet_id)), this_monday)
+
+
+def _report_sheet_error(error: SheetError, what: str, config: Config, dry_run: bool) -> int:
+    print(f"Couldn't read the planning sheet: {error}", file=sys.stderr)
+    if not dry_run:
+        try:
+            post_message(config.slack_token, config.slack_channel,
+                         format_sheet_error(what, str(error), sheet_url(config.sheet_id)))
+        except SlackError as slack_error:
+            print(f"Couldn't report that to Slack either: {slack_error}", file=sys.stderr)
+    return 1
+
+
+def run_weekly(today: date, config: Config, state: Path, dry_run: bool = False, force: bool = False) -> int:
+    """Post this week's plan, then any problems in the sheet as a thread reply."""
+    monday = week_monday(today)
+    if not (dry_run or force) and already_sent(state, "weekly", monday):
+        print(f"The plan for the week of {monday} already went out; use --force to send it again.")
+        return 0
+    try:
+        schedule = _fetch_schedule(config, monday)
+    except SheetError as error:
+        return _report_sheet_error(error, "the Monday plan", config, dry_run)
+    post = format_weekly_post(schedule, monday, sheet_url(config.sheet_id))
+    reply = format_problem_reply(schedule)
+    if dry_run:
+        print(post)
+        if reply:
+            print("--- thread reply ---")
+            print(reply)
+        return 0
+    try:
+        ts = post_message(config.slack_token, config.slack_channel, post)
+    except SlackError as error:
+        print(f"Couldn't post the plan: {error}", file=sys.stderr)
+        return 1
+    record_sent(state, "weekly", monday)
+    if reply:
+        try:
+            post_message(config.slack_token, config.slack_channel, reply, thread_ts=ts)
+        except SlackError as error:
+            print(f"Posted the plan, but couldn't post the problem list: {error}", file=sys.stderr)
+            return 1
+    print(f"Posted the plan for the week of {monday}.")
+    return 0
+
+
+def run_heads_up(today: date, config: Config, state: Path, dry_run: bool = False, force: bool = False) -> int:
+    """Post the runs that start next week. Only runs Friday to Sunday."""
+    if today.weekday() < 4:
+        print("Heads-up posts go out Friday to Sunday only; skipping.")
+        return 0
+    next_monday = week_monday(today) + timedelta(days=7)
+    if not (dry_run or force) and already_sent(state, "heads-up", next_monday):
+        print(f"The heads-up for the week of {next_monday} already went out; use --force to send it again.")
+        return 0
+    try:
+        schedule = _fetch_schedule(config, week_monday(today))
+    except SheetError as error:
+        return _report_sheet_error(error, "the Friday heads-up", config, dry_run)
+    post = format_heads_up_post(schedule, next_monday, sheet_url(config.sheet_id))
+    if post is None:
+        print("Nothing starts next week, so there's no heads-up.")
+        return 0
+    if dry_run:
+        print(post)
+        return 0
+    try:
+        post_message(config.slack_token, config.slack_channel, post)
+    except SlackError as error:
+        print(f"Couldn't post the heads-up: {error}", file=sys.stderr)
+        return 1
+    record_sent(state, "heads-up", next_monday)
+    print(f"Posted the heads-up for the week of {next_monday}.")
+    return 0
+
+
+app = App(help="Post HPC usage reminders from the planning sheet to Slack.")
+
+
+def _run(job: Callable[..., int], dry_run: bool, pretend_today_is: date | None, force: bool) -> int:
+    try:
+        config = load_config(os.environ, need_slack=not dry_run)
+    except ConfigError as error:
+        print(error, file=sys.stderr)
+        return 1
+    return job(pretend_today_is or nz_today(), config, state_path(os.environ), dry_run=dry_run, force=force)
+
+
+@app.command
+def weekly(*, dry_run: bool = False, pretend_today_is: date | None = None, force: bool = False) -> int:
+    """Post the Monday plan: this week's runs, idle HPCs, and problems in the sheet.
+
+    Parameters
+    ----------
+    dry_run
+        Print the post instead of sending it. Only SHEET_ID needs to be set.
+    pretend_today_is
+        Run as if today were this date (YYYY-MM-DD), for testing.
+    force
+        Send even if this week's post already went out.
+    """
+    return _run(run_weekly, dry_run, pretend_today_is, force)
+
+
+@app.command(name="heads-up")
+def heads_up(*, dry_run: bool = False, pretend_today_is: date | None = None, force: bool = False) -> int:
+    """Post the Friday heads-up: runs that start next week.
+
+    Parameters
+    ----------
+    dry_run
+        Print the post instead of sending it. Only SHEET_ID needs to be set.
+    pretend_today_is
+        Run as if today were this date (YYYY-MM-DD), for testing.
+    force
+        Send even if next week's heads-up already went out.
+    """
+    return _run(run_heads_up, dry_run, pretend_today_is, force)
+
+
+if __name__ == "__main__":
+    app()
