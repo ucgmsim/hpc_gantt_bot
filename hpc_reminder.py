@@ -267,3 +267,84 @@ def idle_hpcs(schedule: Schedule, monday: date) -> list[str]:
     """Watched HPCs that no run overlaps in the week starting ``monday``, in HPCs-tab order."""
     covered = {run.hpc for run in runs_in_week(schedule, monday)}
     return [hpc.name for hpc in schedule.hpcs if hpc.watched and hpc.name not in covered]
+
+
+# ---------------------------------------------------------------- message text
+
+
+def sheet_url(sheet_id: str) -> str:
+    """Link to the planning sheet, shown at the end of each post."""
+    return f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
+
+
+def escape(text: str) -> str:
+    """Escape the characters Slack's mrkdwn uses for mentions and links."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _mentions(people: list[Person]) -> str:
+    return " ".join(f"<@{person.member_id}>" for person in people)
+
+
+def _run_groups(schedule: Schedule, runs: list[Run]) -> list[str]:
+    """List ``runs`` under a bold heading for each HPC, in HPCs-tab order."""
+    lines = []
+    for hpc in schedule.hpcs:
+        group = [run for run in runs if run.hpc == hpc.name]
+        if group:
+            lines.append(f"*{escape(hpc.name)}*")
+            for run in group:
+                about = f" — {escape(run.description)}" if run.description else ""
+                lines.append(f"• <@{run.person.member_id}>{about} ({format_date_range(run.start, run.end)})")
+    return lines
+
+
+def _sheet_link_line(sheet_link: str) -> str:
+    return f"Plans changed? <{sheet_link}|Update the sheet>"
+
+
+def format_weekly_post(schedule: Schedule, monday: date, sheet_link: str) -> str:
+    """The Monday post: this week's runs by HPC, then an idle-HPC alert for this week and next."""
+    next_monday = monday + timedelta(days=7)
+    sections = [
+        f":spiral_calendar_pad: *HPC plan for this week* · {format_week(monday)}",
+        "\n".join(_run_groups(schedule, runs_in_week(schedule, monday))) or "Nothing planned this week.",
+    ]
+    idle_now, idle_next = idle_hpcs(schedule, monday), idle_hpcs(schedule, next_monday)
+    if idle_now or idle_next:
+        mentions = _mentions(schedule.admins)
+        alert = [f":warning: {mentions} nothing is planned on:" if mentions else ":warning: Nothing is planned on:"]
+        alert += [f"• *{escape(name)}* this week" for name in idle_now]
+        next_week = format_date_range(next_monday, next_monday + timedelta(days=6))
+        alert += [f"• *{escape(name)}* next week ({next_week})" for name in idle_next]
+        sections.append("\n".join(alert))
+    sections.append(_sheet_link_line(sheet_link))
+    return "\n\n".join(sections)
+
+
+def format_heads_up_post(schedule: Schedule, next_monday: date, sheet_link: str) -> str | None:
+    """The Friday post: runs that start next week, or None if nothing starts."""
+    groups = _run_groups(schedule, runs_starting_in_week(schedule, next_monday))
+    if not groups:
+        return None
+    return "\n\n".join([
+        f":eyes: *Heads-up: starting next week* · {format_week(next_monday)}",
+        "\n".join(groups),
+        _sheet_link_line(sheet_link),
+    ])
+
+
+def format_problem_reply(schedule: Schedule) -> str | None:
+    """The thread reply listing problems in the sheet, or None if there are none."""
+    count = len(schedule.problems)
+    if not count:
+        return None
+    header = "1 problem in the sheet needs fixing:" if count == 1 else f"{count} problems in the sheet need fixing:"
+    if mentions := _mentions(schedule.admins):
+        header = f"{mentions} {header}"
+    return "\n".join([header, *(f"• {escape(problem)}" for problem in schedule.problems)])
+
+
+def format_sheet_error(what: str, error: str, sheet_link: str) -> str:
+    """The channel post sent instead of ``what`` when the sheet can't be read."""
+    return f":x: Couldn't read the HPC planning sheet, so {what} didn't go out: {escape(error)}\n<{sheet_link}|Open the sheet>"

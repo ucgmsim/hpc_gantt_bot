@@ -26,6 +26,38 @@ EXAMPLE_TABS = {
 }
 
 
+LINK = "https://docs.google.com/spreadsheets/d/SHEET_ID/edit"
+
+# The posts the design spec shows for EXAMPLE_TABS (Monday 19 Oct and Friday 23 Oct).
+EXPECTED_WEEKLY = f"""\
+:spiral_calendar_pad: *HPC plan for this week* · Mon 19 – Sun 25 Oct
+
+*Mahuika*
+• <@U04ABC1DEF> — Hikurangi rupture scenarios (12 Oct – 1 Nov)
+*Frontera*
+• <@U04GHI2JKL> — Kaikōura validation runs (19 – 23 Oct)
+
+:warning: <@U06EFG6HIJ> nothing is planned on:
+• *Setonix* this week
+• *Frontera* next week (26 Oct – 1 Nov)
+
+Plans changed? <{LINK}|Update the sheet>"""
+
+EXPECTED_HEADS_UP = f"""\
+:eyes: *Heads-up: starting next week* · Mon 26 Oct – Sun 1 Nov
+
+*Mahuika*
+• <@U05MNO3PQR> — Alpine Fault ensemble, part 2 (26 Oct – 13 Nov)
+*Setonix*
+• <@U05STU4VWX> — Velocity model sensitivity tests (28 Oct – 6 Nov)
+
+Plans changed? <{LINK}|Update the sheet>"""
+
+EXPECTED_REPLY = """\
+<@U06EFG6HIJ> 1 problem in the sheet needs fixing:
+• Row 6 (Casey, Frontera): start date "early Nov" isn't a date, so it was skipped."""
+
+
 def make_xlsx(tabs):
     """Build an .xlsx file in memory with one sheet per tab."""
     workbook = openpyxl.Workbook()
