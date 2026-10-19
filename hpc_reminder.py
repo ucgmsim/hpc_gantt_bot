@@ -239,3 +239,31 @@ def parse_schedule(tabs: Mapping[str, Sequence[Sequence[object]]], this_monday: 
             runs.append(Run(number, person, _text(record["Description"]), hpc.name, start, end))
 
     return Schedule(list(people.values()), list(hpcs.values()), runs, problems)
+
+
+# ---------------------------------------------------------------- choosing runs
+
+
+def overlaps(run: Run, monday: date) -> bool:
+    """Return True if the run is on during any day of the week starting ``monday``."""
+    return run.start <= monday + timedelta(days=6) and run.end >= monday
+
+
+def _by_start(runs) -> list[Run]:
+    return sorted(runs, key=lambda run: (run.start, run.person.name.casefold(), run.row))
+
+
+def runs_in_week(schedule: Schedule, monday: date) -> list[Run]:
+    """Runs that overlap the week starting ``monday``, earliest start first."""
+    return _by_start(run for run in schedule.runs if overlaps(run, monday))
+
+
+def runs_starting_in_week(schedule: Schedule, monday: date) -> list[Run]:
+    """Runs whose start date falls in the week starting ``monday``, earliest first."""
+    return _by_start(run for run in schedule.runs if monday <= run.start <= monday + timedelta(days=6))
+
+
+def idle_hpcs(schedule: Schedule, monday: date) -> list[str]:
+    """Watched HPCs that no run overlaps in the week starting ``monday``, in HPCs-tab order."""
+    covered = {run.hpc for run in runs_in_week(schedule, monday)}
+    return [hpc.name for hpc in schedule.hpcs if hpc.watched and hpc.name not in covered]
