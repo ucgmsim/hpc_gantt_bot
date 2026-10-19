@@ -1,0 +1,11 @@
+[Unit]
+Description=HPC usage reminder: %i
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=hpc-reminder
+EnvironmentFile=/etc/hpc-reminder.env
+StateDirectory=hpc-reminder
+ExecStart=/opt/hpc-reminder/.local/bin/uv run --script /opt/hpc-reminder/hpc_reminder.py %i

@@ -1,0 +1,10 @@
+[Unit]
+Description=Friday HPC heads-up post
+
+[Timer]
+OnCalendar=Fri *-*-* 09:00:00 Pacific/Auckland
+Persistent=true
+Unit=hpc-reminder@heads-up.service
+
+[Install]
+WantedBy=timers.target
