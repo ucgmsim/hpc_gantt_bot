@@ -74,3 +74,13 @@ def make_xlsx(tabs):
 def with_runs(*rows):
     """Return EXAMPLE_TABS with its Runs rows replaced by ``rows`` (header kept)."""
     return {**EXAMPLE_TABS, "Runs": [EXAMPLE_TABS["Runs"][0], *rows]}
+
+
+class FakeResponse:
+    """The parts of a requests.Response that hpc_reminder reads."""
+
+    def __init__(self, status_code=200, headers=None, content=b"", json_data=None):
+        self.status_code, self.headers, self.content, self._json = status_code, headers or {}, content, json_data
+
+    def json(self):
+        return self._json

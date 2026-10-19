@@ -11,12 +11,14 @@
 
 import io
 import re
-from collections.abc import Mapping, Sequence
+import time
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import openpyxl
+import requests
 
 NZ = ZoneInfo("Pacific/Auckland")
 
@@ -348,3 +350,71 @@ def format_problem_reply(schedule: Schedule) -> str | None:
 def format_sheet_error(what: str, error: str, sheet_link: str) -> str:
     """The channel post sent instead of ``what`` when the sheet can't be read."""
     return f":x: Couldn't read the HPC planning sheet, so {what} didn't go out: {escape(error)}\n<{sheet_link}|Open the sheet>"
+
+
+# ---------------------------------------------------------------- HTTP
+
+
+class SlackError(Exception):
+    """A message couldn't be posted to Slack."""
+
+
+class _Transient(Exception):
+    """An HTTP response worth retrying (429 or 5xx)."""
+
+    def __init__(self, status_code: int):
+        super().__init__(f"HTTP {status_code}")
+        self.status_code = status_code
+
+
+def _checked(response: requests.Response) -> requests.Response:
+    if response.status_code == 429 or response.status_code >= 500:
+        raise _Transient(response.status_code)
+    return response
+
+
+def with_retries[T](call: Callable[[], T], attempts: int = 3, wait_seconds: float = 5.0) -> T:
+    """Run ``call``, retrying network failures and 429/5xx responses."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return call()
+        except (requests.ConnectionError, requests.Timeout, _Transient):
+            if attempt == attempts:
+                raise
+            time.sleep(wait_seconds)
+    raise AssertionError("attempts must be at least 1")
+
+
+def download_workbook(sheet_id: str) -> bytes:
+    """Download the planning sheet as .xlsx, without credentials (it is link-shared)."""
+    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
+    try:
+        response = with_retries(lambda: _checked(requests.get(url, timeout=30)))
+    except _Transient as exc:
+        raise SheetError(f"download failed with HTTP {exc.status_code}") from exc
+    except requests.RequestException as exc:
+        raise SheetError(f"download failed: {exc}") from exc
+    if response.status_code != 200:
+        raise SheetError(f"download failed with HTTP {response.status_code}")
+    if "spreadsheetml" not in response.headers.get("Content-Type", ""):
+        raise SheetError("the download wasn't a spreadsheet; check the sheet is shared as \"Anyone with the link can view\"")
+    return response.content
+
+
+def post_message(token: str, channel: str, text: str, thread_ts: str | None = None) -> str:
+    """Post ``text`` to a Slack channel (or reply in a thread) and return the message's ts."""
+    payload = {"channel": channel, "text": text, "unfurl_links": False, "unfurl_media": False}
+    if thread_ts is not None:
+        payload["thread_ts"] = thread_ts
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        response = with_retries(lambda: _checked(requests.post(
+            "https://slack.com/api/chat.postMessage", headers=headers, json=payload, timeout=30)))
+    except _Transient as exc:
+        raise SlackError(f"Slack returned HTTP {exc.status_code}") from exc
+    except requests.RequestException as exc:
+        raise SlackError(f"couldn't reach Slack: {exc}") from exc
+    data = response.json()
+    if not data.get("ok"):
+        raise SlackError(f"Slack said: {data.get('error')}")
+    return data["ts"]
