@@ -75,6 +75,12 @@ def test_unreadable_end_date_is_always_reported():
     assert s.problems == ['Row 2 (Alex, Mahuika): end date "whenever" isn\'t a date, so it was skipped.']
 
 
+def test_reversed_dates_are_reported_even_when_the_end_is_past():
+    # New Year slip: "28/12 to 8/1" typed in December stores 8 Jan of the current year
+    s = parse_schedule(with_runs(["Alex", "x", "Mahuika", D(2026, 12, 28), D(2026, 1, 8)]), date(2026, 12, 21))
+    assert (s.runs, s.problems) == ([], ["Row 2 (Alex, Mahuika): start date is after the end date, so it was skipped."])
+
+
 def test_sheet_level_problems():
     tabs = {
         "People": [["Name", "Slack member ID", "Admin"], ["Alex", "U04ABC1DEF", False], ["alex", "U09ZZZ9ZZZ", True], ["Sam", "sam", False]],

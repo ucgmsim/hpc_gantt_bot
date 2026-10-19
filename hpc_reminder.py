@@ -220,7 +220,8 @@ def parse_schedule(tabs: Mapping[str, Sequence[Sequence[object]]], this_monday: 
         if not any(_text(record[column]) for column in TABS["Runs"]):
             continue
         start, end = _as_date(record["Start date"]), _as_date(record["End date"])
-        if end is not None and end < this_monday:
+        # Finished runs aren't checked, unless the dates are reversed: then the end date is the mistake.
+        if end is not None and end < this_monday and not (start is not None and start > end):
             continue
         person_text, hpc_text = _text(record["Person"]), _text(record["HPC"])
         person, hpc = people.get(_key(person_text)), hpcs.get(_key(hpc_text))
