@@ -11,6 +11,7 @@
 """Draw the team's HPC usage plan as a Gantt chart and upload it to Dropbox."""
 
 import io
+import subprocess
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -448,3 +449,23 @@ def draw_chart(layout: Layout, updated: datetime, output: Path) -> None:
 
     fig.savefig(output, dpi=DPI, facecolor=SURFACE)
     plt.close(fig)
+
+
+# ---------------------------------------------------------------- upload
+
+
+class UploadError(Exception):
+    """The chart couldn't be uploaded with rclone."""
+
+
+def upload(local: Path, destination: str, run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> None:
+    """Copy ``local`` to ``destination``, an rclone path such as ``dropbox:/QuakeCoRE/hpc_usage_gantt.png``."""
+    try:
+        result = run(["rclone", "copyto", str(local), destination], capture_output=True, text=True, timeout=300)
+    except FileNotFoundError as exc:
+        raise UploadError("rclone isn't installed (or isn't on PATH)") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise UploadError("rclone timed out after 5 minutes") from exc
+    if result.returncode != 0:
+        errors = [line.strip() for line in result.stderr.splitlines() if line.strip()]
+        raise UploadError(f"rclone failed: {errors[-1] if errors else f'exit code {result.returncode}'}")
