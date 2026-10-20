@@ -3,6 +3,7 @@
 # requires-python = ">=3.14"
 # dependencies = [
 #   "cyclopts",
+#   "matplotlib",
 #   "openpyxl",
 #   "requests",
 # ]
@@ -14,10 +15,18 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import matplotlib
+
+matplotlib.use("Agg")  # draw to files only; mantle has no display
+
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
 import openpyxl
 import requests
+from matplotlib.patches import BoxStyle, FancyBboxPatch, Patch
 
 NZ = ZoneInfo("Pacific/Auckland")
 
@@ -320,3 +329,122 @@ def layout_chart(schedule: Schedule, today: date) -> Layout:
         if not runs:
             row += 1
     return Layout(first_day, end, today, lanes, bars, schedule.problems)
+
+
+# ---------------------------------------------------------------- drawing
+
+# Colours from the dataviz reference palette (light surface).
+SURFACE, INK, INK_SECONDARY, INK_MUTED = "#fcfcfb", "#0b0b0b", "#52514e", "#898781"
+GRIDLINE, DIVIDER = "#e1e0d9", "#c3c2b7"
+CURRENT, FINISHED = "#2a78d6", "#c3c2b7"
+
+DPI = 120
+WIDTH = 14.0  # inches, so the PNG is 1680 px wide
+ROW = 0.42  # inches per row
+LEFT, RIGHT = 1.7, 0.35  # inches beside the plot: HPC names on the left, breathing room on the right
+TOP = 1.45  # inches above the plot: title, subtitle, legend, week labels and "today"
+
+
+# Text drawn over the plot sits on a patch of background, so gridlines and the today line never cross it.
+TEXT_BACKGROUND = {"boxstyle": "square,pad=0.15", "facecolor": SURFACE, "edgecolor": "none"}
+
+
+def _pt(pixels: float) -> float:
+    """Convert pixels to points at the chart's resolution, for line widths."""
+    return pixels * 72 / DPI
+
+
+def chart_subtitle(first_day: date, end: date, updated: datetime) -> str:
+    """The line under the title: when the chart was made and which dates it shows."""
+    stamp = f"{updated:%a} {updated.day} {updated:%b %Y, %H:%M %Z}"
+    return f"Updated {stamp} · showing {format_date_range(first_day, end - timedelta(days=1))}"
+
+
+def footer_lines(problems: list[str], limit: int = 8) -> list[str]:
+    """The small print under the chart, listing at most ``limit`` problems in the sheet."""
+    if not problems:
+        return []
+    lines = ["Problems in the sheet:", *problems[:limit]]
+    if len(problems) > limit:
+        lines.append(f"…and {len(problems) - limit} more")
+    return lines
+
+
+def draw_chart(layout: Layout, updated: datetime, output: Path) -> None:
+    """Draw the layout as a PNG Gantt chart at ``output``."""
+    rows = max(layout.rows, 1)
+    footer = footer_lines(layout.problems)
+    bottom = 0.3 + 0.17 * len(footer) + 0.3  # inches below the plot: problems, then the source line
+    height = TOP + rows * ROW + bottom
+    fig = plt.figure(figsize=(WIDTH, height), dpi=DPI, facecolor=SURFACE)
+    ax = fig.add_axes((LEFT / WIDTH, bottom / height, 1 - (LEFT + RIGHT) / WIDTH, rows * ROW / height))
+    ax.set_facecolor(SURFACE)
+    x0, x1 = mdates.date2num(layout.first_day), mdates.date2num(layout.end)
+    ax.set_xlim(x0, x1)
+    ax.set_ylim(rows, 0)  # row 0 at the top
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    ax.set_yticks([])
+
+    # Week lines at every Monday, labelled along the top.
+    mondays = [layout.first_day + timedelta(weeks=i) for i in range((layout.end - layout.first_day).days // 7)]
+    for monday in mondays:
+        ax.axvline(mdates.date2num(monday), color=GRIDLINE, linewidth=_pt(1), zorder=0)
+    ax.xaxis.tick_top()
+    ax.set_xticks([mdates.date2num(m) for m in mondays], [f"{m.day} {m:%b}" for m in mondays])
+    ax.tick_params(axis="x", length=0, pad=14, labelsize=8, labelcolor=INK_MUTED)
+
+    # Lanes: the HPC name on the left, a divider between lanes, and a note in empty ones.
+    names_x = ax.get_yaxis_transform()  # x in axes fraction, y in rows
+    for i, lane in enumerate(layout.lanes):
+        if i:
+            ax.axhline(lane.top_row, color=DIVIDER, linewidth=_pt(1), zorder=1)
+        ax.text(-0.012, lane.top_row + 0.5, lane.hpc, transform=names_x, ha="right", va="center",
+                fontsize=10, fontweight="bold", color=INK)
+        if lane.empty:
+            ax.text(x0 + 0.5, lane.top_row + 0.5, "nothing planned", ha="left", va="center",
+                    fontsize=9, style="italic", color=INK_MUTED, bbox=TEXT_BACKGROUND, zorder=5)
+    if not layout.lanes:
+        ax.text(0.5, 0.5, "No HPCs listed yet. Add them to the HPCs tab of the sheet.", transform=ax.transAxes,
+                ha="center", va="center", fontsize=11, color=INK_SECONDARY, bbox=TEXT_BACKGROUND, zorder=5)
+
+    # Bars: thin, with 4 px rounded ends. A cut end runs past the plot edge, where clipping squares it off.
+    x_per_px = (x1 - x0) / ((WIDTH - LEFT - RIGHT) * DPI)
+    y_per_px = 1 / (ROW * DPI)
+    for bar in layout.bars:
+        left = mdates.date2num(bar.start) - (6 * x_per_px if bar.cut_start else 0)
+        right = mdates.date2num(bar.end) + (6 * x_per_px if bar.cut_end else 0)
+        ax.add_patch(FancyBboxPatch(
+            (left, bar.row + 0.62), right - left, 10 * y_per_px,
+            boxstyle=BoxStyle.Round(pad=0, rounding_size=4 * x_per_px), mutation_aspect=y_per_px / x_per_px,
+            facecolor=FINISHED if bar.finished else CURRENT, edgecolor="none", linewidth=0, zorder=2,
+        ))
+        ax.text(mdates.date2num(bar.label_x), bar.row + 0.55, bar.caption, ha=bar.label_align, va="bottom",
+                fontsize=9, color=INK, bbox=TEXT_BACKGROUND, zorder=5)
+
+    # Today: a line at the start of today, so every finished bar ends at or before it.
+    today = mdates.date2num(layout.today)
+    ax.axvline(today, color=INK, linewidth=_pt(1.5), zorder=3)  # over the bars, under the text
+    ax.text(today, 0, " today", ha="left", va="bottom", fontsize=8, color=INK, clip_on=False)
+
+    # Title, subtitle and legend.
+    margin = 0.25 / WIDTH
+    fig.text(margin, 1 - 0.22 / height, "HPC usage plan", ha="left", va="top", fontsize=16, color=INK)
+    fig.text(margin, 1 - 0.6 / height, chart_subtitle(layout.first_day, layout.end, updated),
+             ha="left", va="top", fontsize=10, color=INK_SECONDARY)
+    fig.legend(
+        handles=[Patch(facecolor=CURRENT, edgecolor="none", label="underway or upcoming"),
+                 Patch(facecolor=FINISHED, edgecolor="none", label="finished")],
+        loc="upper right", bbox_to_anchor=(1 - RIGHT / WIDTH, 1 - 0.2 / height), ncols=2, frameon=False,
+        fontsize=9, labelcolor=INK_SECONDARY, handlelength=1.2, handleheight=0.8,
+    )
+
+    # Footer: problems in the sheet, then where the data comes from.
+    if footer:
+        fig.text(margin, (bottom - 0.25) / height, "\n".join(footer), ha="left", va="top", fontsize=8,
+                 color=INK_SECONDARY, linespacing=1.5)
+    fig.text(margin, 0.12 / height, "Source: the HPC usage plan Google Sheet", ha="left", va="bottom",
+             fontsize=8, color=INK_MUTED)
+
+    fig.savefig(output, dpi=DPI, facecolor=SURFACE)
+    plt.close(fig)
