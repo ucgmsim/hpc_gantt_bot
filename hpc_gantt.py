@@ -11,7 +11,10 @@
 """Draw the team's HPC usage plan as a Gantt chart and upload it to Dropbox."""
 
 import io
+import os
 import subprocess
+import sys
+import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -27,6 +30,7 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import openpyxl
 import requests
+from cyclopts import App
 from matplotlib.patches import BoxStyle, FancyBboxPatch, Patch
 
 NZ = ZoneInfo("Pacific/Auckland")
@@ -469,3 +473,70 @@ def upload(local: Path, destination: str, run: Callable[..., subprocess.Complete
     if result.returncode != 0:
         errors = [line.strip() for line in result.stderr.splitlines() if line.strip()]
         raise UploadError(f"rclone failed: {errors[-1] if errors else f'exit code {result.returncode}'}")
+
+
+# ---------------------------------------------------------------- the command
+
+DESTINATION = "dropbox:/QuakeCoRE/hpc_usage_gantt.png"
+DEFAULT_OUTPUT = Path("hpc_usage_gantt.png")
+
+
+def update_chart(sheet_id: str, today: date, now: datetime, upload_to: str | None, output: Path | None) -> int:
+    """Download the sheet, draw the chart and, unless ``upload_to`` is None, upload it. Returns the exit code."""
+    try:
+        tabs = read_workbook(download_workbook(sheet_id))
+    except SheetError as error:
+        print(f"Couldn't read the planning sheet: {error}", file=sys.stderr)
+        return 1
+    first_day, _ = chart_window(today)
+    schedule = parse_schedule(tabs, first_day)
+    for problem in schedule.problems:
+        print(f"Sheet problem: {problem}", file=sys.stderr)
+    layout = layout_chart(schedule, today)
+    if upload_to is None:
+        path = output or DEFAULT_OUTPUT
+        draw_chart(layout, now, path)
+        print(f"Wrote {path}")
+        return 0
+    with tempfile.TemporaryDirectory() as scratch:
+        path = output or Path(scratch) / DEFAULT_OUTPUT.name
+        draw_chart(layout, now, path)
+        try:
+            upload(path, upload_to)
+        except UploadError as error:
+            print(error, file=sys.stderr)
+            return 1
+    print(f"Uploaded to {upload_to}")
+    return 0
+
+
+app = App(help="Draw the HPC usage plan as a Gantt chart and upload it to Dropbox.")
+
+
+@app.default
+def main(*, upload: bool = True, output: Path | None = None, upload_to: str = DESTINATION,
+         pretend_today_is: date | None = None) -> int:
+    """Draw the chart from the sheet whose ID is in $SHEET_ID, and upload it.
+
+    Parameters
+    ----------
+    upload
+        Upload the chart. With --no-upload it is only drawn, into --output.
+    output
+        Where to write the PNG. Default: hpc_usage_gantt.png with --no-upload, otherwise a temporary file.
+    upload_to
+        The rclone destination to upload to.
+    pretend_today_is
+        Draw the chart as if today were this date (YYYY-MM-DD), for testing.
+    """
+    sheet_id = os.environ.get("SHEET_ID")
+    if not sheet_id:
+        print("SHEET_ID isn't set", file=sys.stderr)
+        return 1
+    now = datetime.now(NZ)
+    today = pretend_today_is or now.date()
+    return update_chart(sheet_id, today, now, upload_to if upload else None, output)
+
+
+if __name__ == "__main__":
+    app()
