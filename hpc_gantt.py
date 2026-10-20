@@ -241,3 +241,82 @@ def parse_schedule(tabs: Mapping[str, Sequence[Sequence[object]]], first_day: da
             runs.append(Run(number, person, _text(record["Description"]), hpc, start, end))
 
     return Schedule(list(people.values()), list(hpcs.values()), runs, problems)
+
+
+# ---------------------------------------------------------------- chart layout
+
+
+@dataclass(frozen=True)
+class Bar:
+    """One run as drawn: its dates cut to the chart, plus its caption and where the caption goes."""
+
+    row: int  # 0 = top row of the chart
+    start: date  # first day drawn
+    end: date  # day after the last day drawn
+    cut_start: bool  # the run began before the chart's first day
+    cut_end: bool  # the run continues past the chart's end
+    finished: bool  # the run ended before today
+    caption: str
+    label_x: date  # where the caption is anchored
+    label_align: str  # "left" or "right"
+
+
+@dataclass(frozen=True)
+class Lane:
+    hpc: str
+    top_row: int
+    rows: int  # at least 1: an empty lane still gets a row
+    empty: bool
+
+
+@dataclass(frozen=True)
+class Layout:
+    """Everything the chart shows, worked out before anything is drawn."""
+
+    first_day: date
+    end: date  # the day after the last day shown
+    today: date
+    lanes: list[Lane]
+    bars: list[Bar]
+    problems: list[str]
+
+    @property
+    def rows(self) -> int:
+        return sum(lane.rows for lane in self.lanes)
+
+
+def chart_window(today: date) -> tuple[date, date]:
+    """Return (first day, day after the last day): from 2 weeks before this week's Monday to 13 weeks after it."""
+    monday = week_monday(today)
+    return monday - timedelta(weeks=2), monday + timedelta(weeks=13)
+
+
+def caption(person: str, description: str, max_chars: int = 60) -> str:
+    """The text shown with a run's bar, shortened with "…" if it is too long."""
+    text = f"{person} · {description}" if description else person
+    return text if len(text) <= max_chars else text[: max_chars - 1] + "…"
+
+
+def layout_chart(schedule: Schedule, today: date) -> Layout:
+    """Give every run that falls within the chart its own row, grouped into one lane per HPC."""
+    first_day, end = chart_window(today)
+    late = first_day + timedelta(days=70)  # bars starting this late get right-aligned captions
+    lanes, bars, row = [], [], 0
+    for hpc in schedule.hpcs:
+        runs = sorted(
+            (run for run in schedule.runs if run.hpc == hpc and run.start < end and run.end >= first_day),
+            key=lambda run: (run.start, run.person.casefold(), run.row),
+        )
+        lanes.append(Lane(hpc, row, max(len(runs), 1), not runs))
+        for run in runs:
+            day_after = run.end + timedelta(days=1)
+            start, stop = max(run.start, first_day), min(day_after, end)
+            right = start >= late
+            bars.append(Bar(
+                row, start, stop, run.start < first_day, day_after > end, run.end < today,
+                caption(run.person, run.description), stop if right else start, "right" if right else "left",
+            ))
+            row += 1
+        if not runs:
+            row += 1
+    return Layout(first_day, end, today, lanes, bars, schedule.problems)
