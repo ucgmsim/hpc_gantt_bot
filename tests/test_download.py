@@ -1,16 +1,16 @@
 import pytest
 import requests
 
-import hpc_reminder
+import hpc_gantt
 from helpers import FakeResponse
-from hpc_reminder import SheetError, SlackError, download_workbook, post_message
+from hpc_gantt import SheetError, download_workbook
 
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 @pytest.fixture(autouse=True)
 def no_sleep(monkeypatch):
-    monkeypatch.setattr(hpc_reminder.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(hpc_gantt.time, "sleep", lambda seconds: None)
 
 
 def fake(monkeypatch, name, *outcomes):
@@ -24,7 +24,7 @@ def fake(monkeypatch, name, *outcomes):
             raise outcome
         return outcome
 
-    monkeypatch.setattr(hpc_reminder.requests, name, call)
+    monkeypatch.setattr(hpc_gantt.requests, name, call)
     return calls
 
 
@@ -57,30 +57,3 @@ def test_network_failure_gives_up_after_three_tries(monkeypatch):
     with pytest.raises(SheetError, match="download failed"):
         download_workbook("abc")
     assert len(calls) == 3
-
-
-def test_post_message_request(monkeypatch):
-    calls = fake(monkeypatch, "post", FakeResponse(200, json_data={"ok": True, "ts": "1.2"}))
-    assert post_message("xoxb-t", "C1", "hi", thread_ts="0.1") == "1.2"
-    url, kwargs = calls[0]
-    assert url == "https://slack.com/api/chat.postMessage"
-    assert kwargs["headers"]["Authorization"] == "Bearer xoxb-t"
-    assert kwargs["json"] == {"channel": "C1", "text": "hi", "unfurl_links": False, "unfurl_media": False, "thread_ts": "0.1"}
-
-
-def test_post_without_thread_has_no_thread_ts(monkeypatch):
-    calls = fake(monkeypatch, "post", FakeResponse(200, json_data={"ok": True, "ts": "1.2"}))
-    post_message("xoxb-t", "C1", "hi")
-    assert "thread_ts" not in calls[0][1]["json"]
-
-
-def test_slack_refusal_is_not_retried(monkeypatch):
-    calls = fake(monkeypatch, "post", FakeResponse(200, json_data={"ok": False, "error": "channel_not_found"}))
-    with pytest.raises(SlackError, match="channel_not_found"):
-        post_message("xoxb-t", "C1", "hi")
-    assert len(calls) == 1
-
-
-def test_slack_server_error_is_retried(monkeypatch):
-    calls = fake(monkeypatch, "post", FakeResponse(500), FakeResponse(200, json_data={"ok": True, "ts": "1.2"}))
-    assert post_message("xoxb-t", "C1", "hi") == "1.2" and len(calls) == 2

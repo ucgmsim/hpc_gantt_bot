@@ -2,7 +2,7 @@ from datetime import date, datetime, timezone
 
 import pytest
 
-from hpc_reminder import format_date_range, format_week, nz_today, week_monday
+from hpc_gantt import format_date_range, nz_today, week_monday
 
 
 @pytest.mark.parametrize("day", [date(2026, 10, 19), date(2026, 10, 21), date(2026, 10, 25)])
@@ -18,15 +18,6 @@ def test_week_monday(day):
 ])
 def test_format_date_range(start, end, text):
     assert format_date_range(start, end) == text
-
-
-@pytest.mark.parametrize("monday, text", [
-    (date(2026, 10, 19), "Mon 19 – Sun 25 Oct"),
-    (date(2026, 10, 26), "Mon 26 Oct – Sun 1 Nov"),
-    (date(2026, 12, 28), "Mon 28 Dec 2026 – Sun 3 Jan 2027"),
-])
-def test_format_week(monday, text):
-    assert format_week(monday) == text
 
 
 def test_nz_today_uses_new_zealand_dates():

@@ -1,7 +1,7 @@
 import pytest
 
 from helpers import EXAMPLE_TABS, MON
-from hpc_reminder import parse_schedule
+from hpc_gantt import parse_schedule
 
 
 @pytest.fixture
