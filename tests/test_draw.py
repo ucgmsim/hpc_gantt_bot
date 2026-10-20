@@ -49,3 +49,12 @@ def test_unicode_and_long_text_draw_without_warnings(tmp_path):
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         draw_chart(layout_chart(s, TUE), UPDATED, tmp_path / "text.png")
+
+
+def test_dollar_signs_draw_literally(tmp_path):
+    # "$...$" must not be read as maths: "$RUN_1_2" used to crash the hourly run with a mathtext ValueError
+    s = Schedule(["Alex"], ["Cluster $A_1_2$"],
+                 [Run(2, "Alex", "Rerun $RUN_1_2 and $RUN_1_3", "Cluster $A_1_2$", date(2026, 10, 20), date(2026, 10, 30))],
+                 ['Row 9 (Alex, ?): start date "$X_1_2$" isn\'t a date'])
+    draw_chart(layout_chart(s, TUE), UPDATED, tmp_path / "dollars.png")
+    assert png_size(tmp_path / "dollars.png")[0] == 1680

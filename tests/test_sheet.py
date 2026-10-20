@@ -96,3 +96,9 @@ def test_real_google_export():
     s = parse_schedule(tabs, MON)
     assert (s.people, s.hpcs, s.runs) == ([], [], [])
     assert s.problems == ["Row 2 (?, ?): no person given; no HPC given"]
+
+
+def test_line_breaks_in_cells_are_collapsed():
+    # Alt+Enter in a cell must not turn a caption into several lines that climb into the row above
+    run = parse_schedule(with_runs(["Alex", "Hikurangi scenarios\nphase 2\n(see  Slack)", "Mahuika", d1, d2]), MON).runs[0]
+    assert run.description == "Hikurangi scenarios phase 2 (see Slack)"

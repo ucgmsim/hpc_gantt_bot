@@ -776,6 +776,8 @@ This needs the user: mantle access (they run the commands, or set up SSH for Cla
 - [ ] **Step 1: Check prerequisites with the user.**
   - Choose the account.
   - Check whether rclone and uv are installed for it.
+  - Check that mantle's C library is new enough: `ldd --version` must show glibc 2.28 or later, which the locked matplotlib and numpy wheels need *(final review)*.
+  - Check that the account has a real home directory, where uv's cache, the downloaded Python, matplotlib's cache and the rclone config live *(final review)*.
   - Make sure its `rclone.conf` has a working `dropbox` remote: `rclone lsf dropbox:/QuakeCoRE --max-depth 1` should run as that account without errors.
 - [ ] **Step 2: Follow the README's "Deploy on mantle" steps 1–4.** Then run the service once: `sudo systemctl start hpc-gantt.service`. Expected: `journalctl -u hpc-gantt -n 20` shows `Uploaded to dropbox:/QuakeCoRE/hpc_usage_gantt.png`, and the file's time changes (`rclone lsl dropbox:/QuakeCoRE/hpc_usage_gantt.png`).
 - [ ] **Step 3: Enable the timer.** `sudo systemctl enable --now hpc-gantt.timer`. Expected: `systemctl list-timers hpc-gantt.timer` shows the next run on the hour.

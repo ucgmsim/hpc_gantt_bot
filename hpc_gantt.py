@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo
 import matplotlib
 
 matplotlib.use("Agg")  # draw to files only; mantle has no display
+matplotlib.rcParams["text.parse_math"] = False  # sheet text like "$SCRATCH to $PROJECT" is not maths
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -149,7 +150,8 @@ def read_workbook(xlsx: bytes) -> dict[str, list[tuple]]:
 
 
 def _text(value: object) -> str:
-    return "" if value is None else str(value).strip()
+    """Cell text on one line: line breaks and runs of spaces become single spaces."""
+    return "" if value is None else " ".join(str(value).split())
 
 
 def _key(value: object) -> str:
