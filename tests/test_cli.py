@@ -19,7 +19,7 @@ def world(monkeypatch):
     def fake_upload(local, destination):
         uploads.append((destination, local.read_bytes()[:4] == b"\x89PNG"))
 
-    monkeypatch.setattr(hpc_gantt, "upload", fake_upload)
+    monkeypatch.setattr(hpc_gantt, "rclone_upload", fake_upload)
     return SimpleNamespace(uploads=uploads)
 
 
@@ -46,7 +46,7 @@ def test_upload_failure_exits_1(world, monkeypatch, capsys):
     def failing(local, destination):
         raise UploadError("rclone isn't installed (or isn't on PATH)")
 
-    monkeypatch.setattr(hpc_gantt, "upload", failing)
+    monkeypatch.setattr(hpc_gantt, "rclone_upload", failing)
     assert update_chart("ID", NOW.date(), NOW, DESTINATION, None) == 1
     assert "rclone isn't installed" in capsys.readouterr().err
 

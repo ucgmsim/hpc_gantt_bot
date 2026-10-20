@@ -464,7 +464,7 @@ class UploadError(Exception):
     """The chart couldn't be uploaded with rclone."""
 
 
-def upload(local: Path, destination: str, run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> None:
+def rclone_upload(local: Path, destination: str, run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> None:
     """Copy ``local`` to ``destination``, an rclone path such as ``dropbox:/QuakeCoRE/hpc_usage_gantt.png``."""
     try:
         result = run(["rclone", "copyto", str(local), destination], capture_output=True, text=True, timeout=300)
@@ -504,7 +504,7 @@ def update_chart(sheet_id: str, today: date, now: datetime, upload_to: str | Non
         path = output or Path(scratch) / DEFAULT_OUTPUT.name
         draw_chart(layout, now, path)
         try:
-            upload(path, upload_to)
+            rclone_upload(path, upload_to)
         except UploadError as error:
             print(error, file=sys.stderr)
             return 1
@@ -536,7 +536,7 @@ def main(*, upload: bool = True, output: Path | None = None, upload_to: str = DE
         print("SHEET_ID isn't set", file=sys.stderr)
         return 1
     now = datetime.now(NZ)
-    today = pretend_today_is or now.date()
+    today = pretend_today_is or nz_today(now)
     return update_chart(sheet_id, today, now, upload_to if upload else None, output)
 
 

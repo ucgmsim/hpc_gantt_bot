@@ -43,8 +43,5 @@ def with_runs(*rows):
 class FakeResponse:
     """The parts of a requests.Response that hpc_gantt reads."""
 
-    def __init__(self, status_code=200, headers=None, content=b"", json_data=None):
-        self.status_code, self.headers, self.content, self._json = status_code, headers or {}, content, json_data
-
-    def json(self):
-        return self._json
+    def __init__(self, status_code=200, headers=None, content=b""):
+        self.status_code, self.headers, self.content = status_code, headers or {}, content
