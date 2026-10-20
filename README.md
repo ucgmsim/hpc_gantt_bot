@@ -1,66 +1,74 @@
-# HPC usage reminder bot
+# HPC usage Gantt chart
 
-Reads the team's "HPC usage plan" Google Sheet and posts reminders to a Slack channel.
-- **Mondays at 9am** (New Zealand time): the week's planned HPC runs, with an @mention for each person. The admin also gets an @mention about watched HPCs that have nothing planned this week or next.
-- **Fridays at 9am:** a heads-up about runs that start the following week.
+Draws the team's **HPC usage plan** (a Google Sheet) as a Gantt chart and uploads it to Dropbox. Each upload replaces the previous chart.
+- **Layout:** one lane per HPC, and one bar per run, labelled "Person · description".
+- **Colours:** blue bars are underway or upcoming; grey bars have finished.
+- **Span:** from two weeks back to about three months ahead.
+- **Problems:** any rows in the sheet it couldn't draw are listed under the chart.
 
-The full design is in [docs/superpowers/specs/2026-10-19-hpc-usage-reminder-bot-design.md](docs/superpowers/specs/2026-10-19-hpc-usage-reminder-bot-design.md).
+It runs every hour on mantle and uploads to `dropbox:/QuakeCoRE/hpc_usage_gantt.png`. A recurring Slack reminder, set up in Slack itself, posts the file's share link. The design is in [docs/superpowers/specs/2026-10-20-hpc-usage-gantt-design.md](docs/superpowers/specs/2026-10-20-hpc-usage-gantt-design.md).
 
 ## The sheet
 
-The sheet has three tabs, **Runs**, **People** and **HPCs**, described in the design's "The Google Sheet" section.
+Three tabs, each with its header in row 1:
 
-To join, add a row to **People** with your name and your Slack member ID. To find your ID in Slack:
-1. Click your profile picture, then **Profile**.
-2. Click the three-dot (**More**) button.
-3. Choose **Copy member ID**.
+| Tab | Columns |
+|---|---|
+| Runs | Person, Description, HPC, Start date, End date |
+| People | Name |
+| HPCs | HPC |
 
-Your name then appears in the Person dropdown on **Runs**.
+- **Dropdowns:** Person and HPC on the Runs tab are dropdowns fed by the other two tabs.
+- **End dates** count as part of the run.
+- **Sharing:** the sheet must stay shared as "Anyone with the link can view".
 
-## Try it
+## Try it on your laptop
 
-Print what the posts would say, without sending anything:
+Draw the chart without uploading it. This writes `hpc_usage_gantt.png`:
 
 ```bash
-SHEET_ID=<id from the sheet's URL> uv run --script hpc_reminder.py weekly --dry-run
-SHEET_ID=<id from the sheet's URL> uv run --script hpc_reminder.py heads-up --dry-run --pretend-today-is 2026-10-23
+SHEET_ID=<id from the sheet's URL> uv run --script hpc_gantt.py --no-upload
 ```
 
-`--pretend-today-is YYYY-MM-DD` runs as if it were another day. Runs that actually post also need `SLACK_BOT_TOKEN` and `SLACK_CHANNEL`.
+Try an upload to your own Dropbox folder. This needs an rclone remote called `dropbox`:
+
+```bash
+SHEET_ID=<id> uv run --script hpc_gantt.py --upload-to dropbox:/QuakeCoRE/<you>/hpc_usage_gantt_test.png
+```
+
+`--pretend-today-is YYYY-MM-DD` draws the chart as if it were another day.
 
 ## Tests
 
 ```bash
-uv run --no-project --python 3.14 --with pytest --with-requirements hpc_reminder.py python -m pytest -q
+uv run --no-project --python 3.14 --with pytest --with-requirements hpc_gantt.py python -m pytest -q
 ```
+
+## The share link and the Slack reminder
+
+After the first upload, create a share link, which lets anyone with the link view the chart:
+
+```bash
+rclone link dropbox:/QuakeCoRE/hpc_usage_gantt.png
+```
+
+Then, in the Slack channel, type `/remind #channel "HPC usage plan: <link>" every Monday at 9am`. Each upload replaces the file in place, so the link always shows the latest chart.
 
 ## Deploy on mantle
 
-```bash
-# 1. A service account with its own uv
-sudo useradd --system --create-home --home-dir /opt/hpc-reminder --shell /usr/sbin/nologin hpc-reminder
-sudo -u hpc-reminder -H sh -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'
-# 2. Code and units (run from a copy of this repo on mantle)
-sudo install -o root -g root -m 644 hpc_reminder.py /opt/hpc-reminder/hpc_reminder.py
-sudo install -o root -g root -m 644 deploy/hpc-reminder@.service deploy/hpc-reminder-weekly.timer deploy/hpc-reminder-heads-up.timer /etc/systemd/system/
-# 3. Settings and secrets: root-only, systemd reads the file before dropping privileges
-sudo install -o root -g root -m 600 deploy/hpc-reminder.env.example /etc/hpc-reminder.env
-sudoedit /etc/hpc-reminder.env
-sudo systemctl daemon-reload
-# 4. Dry run as the service user: prints the Monday post and sends nothing
-#    (the first run also downloads Python 3.14 for uv)
-sudo systemd-run --pipe --wait --uid=hpc-reminder -p EnvironmentFile=/etc/hpc-reminder.env \
-  /opt/hpc-reminder/.local/bin/uv run --script /opt/hpc-reminder/hpc_reminder.py weekly --dry-run
-# 5. Go live
-sudo systemctl enable --now hpc-reminder-weekly.timer hpc-reminder-heads-up.timer
-systemctl list-timers 'hpc-reminder*'
-```
+1. **Pick the account that will run it.** It needs uv, rclone, and an `rclone.conf` with a working `dropbox` remote.
+   - On a new account, install uv and rclone, then copy in the `rclone.conf`. The file must be owned by that account with mode 600, and stay writable, because rclone refreshes the Dropbox token and saves it back.
+   - Optionally, give the bot its own token with `rclone authorize "dropbox"`, so it can be revoked without affecting anyone else.
+   - Check it works by running `rclone lsf dropbox:/QuakeCoRE --max-depth 1` as that account.
+2. **Copy the script and its lock file:** `sudo install -D -m 644 -t /opt/hpc-gantt/ hpc_gantt.py hpc_gantt.py.lock`
+3. **Install the units.** In `deploy/hpc-gantt.service`, fill in the three `CHANGE_ME` values: the account, the sheet ID, and the directory that holds that account's `uv`. Then run `sudo install -m 644 deploy/hpc-gantt.service deploy/hpc-gantt.timer /etc/systemd/system/`
+4. **Reload systemd:** `sudo systemctl daemon-reload`
+5. **Test it:** `sudo systemctl start hpc-gantt.service && journalctl -u hpc-gantt -n 20`. The log should end with `Uploaded to dropbox:/QuakeCoRE/hpc_usage_gantt.png`.
+6. **Go live:** `sudo systemctl enable --now hpc-gantt.timer`
 
 ## Operating
 
-- **Next scheduled posts:** `systemctl list-timers 'hpc-reminder*'`
-- **Logs:** `journalctl -u 'hpc-reminder@*'`
-- **Post now:** `sudo systemctl start hpc-reminder@weekly.service`. This does nothing if this week's post has already gone out.
-- **Send a post again anyway:** use the step-4 `systemd-run` line, with `weekly --force` (or `heads-up --force`) instead of `weekly --dry-run`.
-- **Change the channel:** invite AI boss to the new channel, then put its ID in `/etc/hpc-reminder.env` using `sudoedit`. The next run picks it up.
-- **Update the code:** copy the new `hpc_reminder.py` into place with the step-2 `install` line.
+- **Next run:** `systemctl list-timers hpc-gantt.timer`
+- **Log:** `journalctl -u hpc-gantt`
+- **Refresh the chart now:** `sudo systemctl start hpc-gantt.service`
+- **After changing the script's dependencies:** run `uv lock --script hpc_gantt.py` to re-lock, then copy both files to mantle again.

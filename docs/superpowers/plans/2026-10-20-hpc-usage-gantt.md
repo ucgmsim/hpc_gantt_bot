@@ -707,6 +707,8 @@ WantedBy=timers.target
 
 - [ ] **Step 2: Check the schedule.** Run `systemd-analyze calendar hourly`. Expected: the next run is on the hour.
 
+- [ ] **Step 2b: Pin the libraries** *(added 2026-10-20; the user chose this over Docker)*. Run `uv lock --script hpc_gantt.py` and commit `hpc_gantt.py.lock`. The README's deploy step copies it to mantle with the script.
+
 - [ ] **Step 3: Rewrite `README.md`** with these sections:
   1. **What it does:** the chart, the fixed Dropbox file, and the Slack reminder, which is set up outside the code. Link to the spec.
   2. **The sheet:** the three tabs and their columns.
