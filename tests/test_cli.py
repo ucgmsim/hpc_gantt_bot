@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 
 import hpc_gantt
-from helpers import EXAMPLE_TABS, NOW, make_xlsx, png_size
+from helpers import EXAMPLE_TABS, NOW, make_xlsx, png_size, with_runs
 from hpc_gantt import DESTINATION, SheetError, UploadError, update_chart
 
 
@@ -49,9 +49,20 @@ def test_upload_failure_exits_1(uploads, monkeypatch, capsys):
     assert "rclone isn't installed" in capsys.readouterr().err
 
 
-def test_sheet_problems_go_to_stderr(uploads, tmp_path, capsys):
-    update_chart("ID", NOW.date(), NOW, None, tmp_path / "c.png")
-    assert 'Sheet problem: Row 6 (Casey, Frontera): start date "early Nov" isn\'t a date' in capsys.readouterr().err
+@pytest.mark.parametrize("problem_rows, logged", [
+    (0, ""),
+    (1, "The sheet has 1 problem, listed at the bottom of the chart.\n"),
+    (2, "The sheet has 2 problems, listed at the bottom of the chart.\n"),
+])
+def test_only_the_number_of_sheet_problems_is_logged(uploads, monkeypatch, tmp_path, capsys, problem_rows, logged):
+    # Run logs are public on GitHub, so names and sheet text stay out of them
+    good = ["Alex", "x", "Mahuika", date(2026, 10, 19), date(2026, 10, 23)]
+    bad = [["Jamie", "x", "Mahuika", date(2026, 10, 19), date(2026, 10, 23)],
+           ["Casey", "x", "Frontera", "early Nov", date(2026, 11, 13)]]
+    tabs = with_runs(good, *bad[:problem_rows])
+    monkeypatch.setattr(hpc_gantt, "download_workbook", lambda sheet_id: make_xlsx(tabs))
+    assert update_chart("ID", NOW.date(), NOW, None, tmp_path / "c.png") == 0
+    assert capsys.readouterr().err == logged
 
 
 def test_cli_flags(monkeypatch, tmp_path):

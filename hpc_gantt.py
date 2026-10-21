@@ -458,8 +458,9 @@ def update_chart(sheet_id: str, today: date, now: datetime, upload_to: str | Non
         return 1
     first_day, _ = chart_window(today)
     schedule = parse_schedule(tabs, first_day)
-    for problem in schedule.problems:
-        print(f"Sheet problem: {problem}", file=sys.stderr)
+    if schedule.problems:
+        count = len(schedule.problems)
+        print(f"The sheet has {count} problem{'' if count == 1 else 's'}, listed at the bottom of the chart.", file=sys.stderr)
     layout = layout_chart(schedule, today)
     if upload_to is None:
         path = output or DEFAULT_OUTPUT
