@@ -2,6 +2,8 @@
 
 2026-10-20 · Approved by the user. This replaces the Slack-bot design of 2026-10-19 (`2026-10-19-hpc-usage-reminder-bot-design.md`).
 
+**Updated 2026-10-22** *(decided)*: the bot now runs once a week on GitHub Actions, in the public repo `ucgmsim/hpc_gantt_bot`, instead of hourly on mantle. See "On GitHub Actions".
+
 **Tags:**
 - *(decided)*: the user decided it.
 - *(approved)*: Claude proposed it and the user approved it.
@@ -15,7 +17,7 @@ For simplicity, the team dropped the Slack bot *(decided)*. Instead, an always-c
 
 ## What it does
 
-A small script runs every hour on mantle *(approved)*. Each run:
+A small script runs once a week, early on Monday mornings NZ time, as a scheduled GitHub Actions workflow. Anyone with write access to the repo can also start it with the "Run workflow" button *(decided 2026-10-22; the day and time are Claude's call)*. Each run:
 
 1. Downloads the "HPC usage plan" Google Sheet as `.xlsx`. No login is needed because the sheet is link-shared. This is the existing code.
 2. Checks the rows with the existing rules, minus everything that was only there for Slack.
@@ -24,7 +26,7 @@ A small script runs every hour on mantle *(approved)*. Each run:
 
 **Outside the code** *(decided)*: after the first upload, the user creates a Dropbox share link to that file and sets up a recurring Slack message with it, e.g. `/remind #channel "HPC usage plan: <link>" every Monday at 9am`. The file is replaced in place, so the link keeps showing the latest chart. This is checked during the laptop trial.
 
-**Order of work** *(decided)*: get the chart drawn and uploaded from the laptop first, and only then set it up as a service on mantle.
+**Order of work** *(decided)*: get the chart drawn and uploaded from the laptop first, and only then set it up to run on GitHub Actions.
 
 ## Goals
 
@@ -91,9 +93,9 @@ The chart follows the dataviz skill's rules, and the layout descends from `gantt
 
 ## Uploading
 
-- **Command:** `rclone copyto <local png> dropbox:/QuakeCoRE/hpc_usage_gantt.png`. rclone uses the running account's own config, where the remote is called `dropbox` *(decided)*.
+- **Command:** `rclone copyto <local png> dropbox:/QuakeCoRE/hpc_usage_gantt.png`. The remote is called `dropbox` *(decided)*. On GitHub it's defined by environment variables filled from a secret (see "On GitHub Actions").
 - **Destination:** this is a command-line option, so trials can upload elsewhere.
-- **Failure:** if rclone fails, the script exits with an error, which goes to the systemd journal.
+- **Failure:** if rclone fails, the script exits with an error, which fails the workflow run. GitHub then emails whoever last edited the schedule.
 - **Share link:** create it once, after the first upload. Either run `rclone link dropbox:/QuakeCoRE/hpc_usage_gantt.png`, which creates an "anyone with the link can view" link, or use Dropbox's Share button. This publishes the file, so it's done only with the user's go-ahead.
 
 ## Running it
@@ -106,10 +108,11 @@ The chart follows the dataviz skill's rules, and the layout descends from `gantt
   - Without it, the script draws the chart and uploads it to `--upload-to` (default `dropbox:/QuakeCoRE/hpc_usage_gantt.png`).
 - **Code that goes:** everything specific to Slack. That's the message text, posting, retry-on-post, state file, idle alerts, weekly and heads-up commands, their tests, and the current systemd units.
 - **Code that stays:** the date helpers, the sheet download with retries, and the sheet parsing (simplified as above), with their tests.
+- **Log output** *(decided 2026-10-22)*: the run log of a public repo is public. So the script logs only how many problems it found in the sheet, never the names or text. The problems themselves are listed on the chart.
 
 ## Laptop trial
 
-These steps run before anything is set up on mantle *(decided)*:
+These steps run before anything is set up on GitHub *(decided)*:
 
 1. **Look at it locally.**
    - Draw the chart from the example data and look at it. This is the visual check.
@@ -117,15 +120,26 @@ These steps run before anything is set up on mantle *(decided)*:
 2. **Upload to a test file.** Use the user's own folder, e.g. `dropbox:/QuakeCoRE/<you>/hpc_usage_gantt_test.png`. Create a share link, upload again, and check that the same link now shows the new chart.
 3. **Upload to the real path** and create the real share link, when the user says so. Ideally that's once the HPCs tab is filled in, because the link goes to the whole team *(Claude's call)*.
 
-## On mantle (later, with the user)
+## On GitHub Actions *(decided 2026-10-22)*
 
-- **Schedule:** a systemd service plus a timer that fires every hour.
-- **Account:** the service runs either as an existing account that already has rclone set up, or as a new account. A new account needs rclone installed and the Dropbox token in its rclone config *(decided; which one is still open)*.
-- **rclone config:**
-  - rclone refreshes the Dropbox token and writes it back, so the config must be writable by that account.
-  - The token gives full access to the team's Dropbox, so the config file is mode 600.
-  - Authorising a separate token for the bot (`rclone authorize "dropbox"`) would let it be revoked without affecting anything else. This is optional.
-- **Environment:** `SHEET_ID` can go straight into the unit file, since it's no longer next to any secret.
+This replaces the earlier plan of an hourly systemd timer on mantle. On GitHub the bot needs no server, changes to it are merged like any other change, and a failed run emails someone.
+
+- **Repo:** public, `ucgmsim/hpc_gantt_bot` *(decided)*. The workflow is `.github/workflows/update-chart.yml` on `main`.
+- **When:** once a week, plus on demand *(decided)*.
+  - The schedule is `cron: "17 17 * * 0"`: Sunday 17:17 UTC, which is Monday 06:17 NZDT or 05:17 NZST.
+  - `workflow_dispatch` adds the "Run workflow" button.
+  - Running at 17 minutes past avoids the top of the hour, GitHub's busiest time *(Claude's call)*.
+- **Secrets** *(decided)*: `SHEET_ID`, and `DROPBOX_REFRESH_TOKEN`, the long-lived refresh token of the laptop's `dropbox` rclone remote.
+  - The refresh token is stored on its own, as a plain string, because GitHub only reliably masks a secret that's printed whole. The workflow wraps it in rclone's token JSON with an expiry date in the past, so rclone fetches a fresh access token at once. Tested on the laptop on 2026-10-22 *(Claude's call)*.
+  - The secrets live in a GitHub environment called `dropbox` that only `main` can use.
+  - Nobody can read a secret back, GitHub masks secret values in logs, and workflows started from forks get no secrets.
+  - The sheet's link must never be public. Before the first push, `git filter-repo` removes the sheet ID and the team Google account's address from every commit.
+- **rclone:** installed on the runner from Ubuntu's packages.
+  - The remote comes from `RCLONE_CONFIG_DROPBOX_TYPE=dropbox` and `RCLONE_CONFIG_DROPBOX_TOKEN`.
+  - rclone refreshes the short-lived access token on each run, and the refreshed copy is thrown away with the runner. This was tested on the laptop on 2026-10-22.
+- **Pinned versions:** uv is pinned to 0.11.28, the version that wrote `hpc_gantt.py.lock`. Actions are pinned to commit SHAs.
+- **Keep-alive:** GitHub turns off schedules in a public repo after 60 days without a commit. On scheduled runs, a second job re-enables the workflow through GitHub's API. Only that job gets `actions: write`.
+- **Not on GitHub:** the chart itself. It isn't saved as a run artifact; it only goes to Dropbox.
 
 ## Left to the builder
 
@@ -139,6 +153,6 @@ These steps run before anything is set up on mantle *(decided)*:
 
 ## Open items
 
-- Which mantle account runs the service.
+- Branch protection on `main`, i.e. requiring a reviewed pull request. It would stop anyone with write access from changing the workflow to read the secrets. The user decides.
 - The channel and wording of the Slack reminder. The user sets this up.
 - Whether the share link survives a re-upload. The laptop trial checks this.

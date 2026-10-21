@@ -2,16 +2,16 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the Slack bot with `hpc_gantt.py`, which downloads the "HPC usage plan" sheet, draws a Gantt chart PNG, and uploads it with rclone to `dropbox:/QuakeCoRE/hpc_usage_gantt.png`. Prove it on the laptop first, then run it hourly on mantle.
+**Goal:** Replace the Slack bot with `hpc_gantt.py`, which downloads the "HPC usage plan" sheet, draws a Gantt chart PNG, and uploads it with rclone to `dropbox:/QuakeCoRE/hpc_usage_gantt.png`. Prove it on the laptop first, then run it weekly on GitHub Actions. *(Changed 2026-10-22: Tasks 9–10 replace Task 8's mantle deployment.)*
 
 **Architecture:**
 - **One file:** a single uv script.
 - **Reused:** the existing sheet download and checks.
 - **New pure function:** `layout_chart` turns the checked sheet into lanes, rows, bars and captions. It's unit-tested.
 - **New thin edges:** `draw_chart` draws that layout with matplotlib, and `upload` shells out to `rclone copyto`.
-- **On mantle:** a systemd timer runs the script once an hour.
+- **On GitHub Actions:** a scheduled workflow runs the script once a week, and on demand.
 
-**Tech Stack:** Python 3.14, uv (PEP 723 script), openpyxl, requests, matplotlib (Agg), cyclopts 5, rclone, pytest, systemd.
+**Tech Stack:** Python 3.14, uv (PEP 723 script), openpyxl, requests, matplotlib (Agg), cyclopts 5, rclone, pytest, GitHub Actions.
 
 **Spec:** `docs/superpowers/specs/2026-10-20-hpc-usage-gantt-design.md`. Read it first. It replaces the 2026-10-19 Slack spec.
 
@@ -45,7 +45,7 @@
 
   Text is never drawn in a bar colour.
 - **No Slack:** no Slack code or tokens anywhere.
-- **Dropbox only with the user:** uploading to or making links in Dropbox happens only in Tasks 7–8.
+- **Dropbox only with the user:** uploading to or making links in Dropbox happens only in Tasks 7 and 10.
 
 ## Review Focus
 
@@ -66,7 +66,7 @@
 | `tests/conftest.py` | The `example_schedule` fixture |
 | `tests/test_dates.py`, `test_sheet.py`, `test_download.py`, `test_layout.py`, `test_draw.py`, `test_upload.py`, `test_cli.py` | One file per area |
 | `tests/fixtures/google_export.xlsx` | Unchanged. It's the real export with the old Slack-era columns, which proves extra columns are ignored |
-| `deploy/hpc-gantt.service`, `deploy/hpc-gantt.timer` | The systemd units, replacing the four `hpc-reminder` files |
+| `.github/workflows/update-chart.yml` | The weekly workflow (Task 10). It replaces the systemd units in `deploy/`, which Task 10 deletes |
 | `README.md` | Rewritten for the chart |
 
 ---
@@ -771,6 +771,8 @@ Record the outcome of each step in the ledger.
 
 ### Task 8: Go live on mantle (with the user)
 
+*Superseded on 2026-10-22: the bot runs on GitHub Actions instead (Tasks 9–10). Nothing was set up on mantle.*
+
 This needs the user: mantle access (they run the commands, or set up SSH for Claude), and a decision on which account runs the service.
 
 - [ ] **Step 1: Check prerequisites with the user.**
@@ -782,3 +784,100 @@ This needs the user: mantle access (they run the commands, or set up SSH for Cla
 - [ ] **Step 2: Follow the README's "Deploy on mantle" steps 1–4.** Then run the service once: `sudo systemctl start hpc-gantt.service`. Expected: `journalctl -u hpc-gantt -n 20` shows `Uploaded to dropbox:/QuakeCoRE/hpc_usage_gantt.png`, and the file's time changes (`rclone lsl dropbox:/QuakeCoRE/hpc_usage_gantt.png`).
 - [ ] **Step 3: Enable the timer.** `sudo systemctl enable --now hpc-gantt.timer`. Expected: `systemctl list-timers hpc-gantt.timer` shows the next run on the hour.
 - [ ] **Step 4: Check it ran on its own.** An hour later, `journalctl -u hpc-gantt --since -1h` shows a successful run.
+
+---
+
+### Task 9: Log only the number of sheet problems
+
+On GitHub, the log of every run is public, and today each problem is logged with names and cell text, e.g. `Sheet problem: Row 6 (Casey, Frontera): start date "early Nov" isn't a date`. Log only the count instead. The chart's footer already lists the problems.
+
+**Files:** `hpc_gantt.py` (`update_chart`), `tests/test_cli.py`.
+
+- [ ] **Step 1: Replace the test.** In `tests/test_cli.py`, replace `test_sheet_problems_go_to_stderr` with the test below, and import `with_runs` from `helpers`:
+
+```python
+@pytest.mark.parametrize("problem_rows, logged", [
+    (0, ""),
+    (1, "The sheet has 1 problem, listed at the bottom of the chart.\n"),
+    (2, "The sheet has 2 problems, listed at the bottom of the chart.\n"),
+])
+def test_only_the_number_of_sheet_problems_is_logged(uploads, monkeypatch, tmp_path, capsys, problem_rows, logged):
+    # Run logs are public on GitHub, so names and sheet text stay out of them
+    good = ["Alex", "x", "Mahuika", date(2026, 10, 19), date(2026, 10, 23)]
+    bad = [["Jamie", "x", "Mahuika", date(2026, 10, 19), date(2026, 10, 23)],
+           ["Casey", "x", "Frontera", "early Nov", date(2026, 11, 13)]]
+    tabs = with_runs(good, *bad[:problem_rows])
+    monkeypatch.setattr(hpc_gantt, "download_workbook", lambda sheet_id: make_xlsx(tabs))
+    assert update_chart("ID", NOW.date(), NOW, None, tmp_path / "c.png") == 0
+    assert capsys.readouterr().err == logged
+```
+
+- [ ] **Step 2: Run it.** `TEST tests/test_cli.py -v`. Expected: the 1- and 2-problem cases FAIL, because the old `Sheet problem: …` lines are printed. The 0-problem case passes.
+- [ ] **Step 3: Implement.** In `update_chart`, replace the loop that prints each problem with:
+
+```python
+    if schedule.problems:
+        count = len(schedule.problems)
+        print(f"The sheet has {count} problem{'' if count == 1 else 's'}, listed at the bottom of the chart.", file=sys.stderr)
+```
+
+- [ ] **Step 4: Run the tests.** `TEST`. Expected: all pass.
+- [ ] **Step 5: Commit.** `git commit -am "fix: log only the number of sheet problems"`
+
+---
+
+### Task 10: Go live on GitHub Actions (with the user)
+
+The user approved this on 2026-10-22:
+- the public repo `ucgmsim/hpc_gantt_bot`;
+- runs weekly, plus on demand;
+- the sheet's link stays private.
+
+Steps 5–7 publish and write to the team's Dropbox. They're done with that approval; anything beyond them needs a new go-ahead.
+
+**Files:**
+- Create `.github/workflows/update-chart.yml`.
+- In `README.md`, replace "Deploy on mantle" and "Operating".
+- Delete `deploy/`.
+
+- [ ] **Step 1: Write the workflow.** `.github/workflows/update-chart.yml`:
+  - **Triggers:** `schedule` with `cron: "17 17 * * 0"` (Monday 06:17 NZDT / 05:17 NZST), and `workflow_dispatch`.
+  - **Permissions:** `permissions: {}` at the top level.
+  - **Job `chart`:**
+    - `environment: dropbox` and `contents: read`;
+    - `actions/checkout` (SHA-pinned v7.0.1, `persist-credentials: false`);
+    - `astral-sh/setup-uv` (SHA-pinned v10.3.1, `version: "0.11.28"`, `enable-cache: false`);
+    - `apt-get install rclone`;
+    - `uv run --script hpc_gantt.py`, with env:
+      - `SHEET_ID` from its secret;
+      - `RCLONE_CONFIG_DROPBOX_TYPE=dropbox`;
+      - `RCLONE_CONFIG_DROPBOX_TOKEN` built as `{"refresh_token":"<secret>","expiry":"2000-01-01T00:00:00Z"}`.
+  - **Job `keepalive`:** only on `schedule` events, with `actions: write`. It runs `gh api --method PUT repos/$GITHUB_REPOSITORY/actions/workflows/update-chart.yml/enable`.
+
+  Lint it with `uvx --from actionlint-py actionlint`. Expected: no findings.
+- [ ] **Step 2: README and clean-up.**
+  - Rewrite the README's deployment and operating sections for GitHub Actions.
+  - `git rm -r deploy`.
+  - `TEST` passes.
+  - Commit: "feat: run weekly on GitHub Actions instead of on mantle".
+- [ ] **Step 3: Merge into main.** `git checkout main && git merge --ff-only feat/hpc-gantt`, then `TEST` on main.
+- [ ] **Step 4: Remove the private details from all history.**
+  - Back up first: `git bundle create <scratchpad>/before-scrub.bundle --all`.
+  - Then run `git filter-repo --force --replace-text <file>`. The file replaces the sheet ID with `<sheet ID>` and removes the team Google account's address.
+  - Expected: neither appears in any blob of `git rev-list --all` or in any commit message, and `TEST` passes.
+- [ ] **Step 5: Publish.**
+  - `gh repo create ucgmsim/hpc_gantt_bot --public`, add it as `origin`, then `git push -u origin main`.
+  - Expected: no workflow run starts, because there's no push trigger.
+- [ ] **Step 6: The environment and secrets.**
+  - Create the `dropbox` environment with a deployment branch policy allowing only `main`.
+  - Set `SHEET_ID` and `DROPBOX_REFRESH_TOKEN` by piping them into `gh secret set --env dropbox`, so they're never printed.
+  - Expected: `gh secret list --env dropbox` shows both names.
+- [ ] **Step 7: The first run.**
+  - `gh workflow run update-chart.yml`, then `gh run watch`.
+  - Expected:
+    - the run succeeds;
+    - its log ends with `Uploaded to dropbox:/QuakeCoRE/hpc_usage_gantt.png` and shows no sheet text and no secret values;
+    - `rclone lsl` shows the file's new time;
+    - the downloaded chart looks right.
+- [ ] **Step 8: The real share link.** This was Task 7 Step 5, and needs the user's go-ahead. Run `rclone link dropbox:/QuakeCoRE/hpc_usage_gantt.png` and give the link to the user for their Slack `/remind`.
+- [ ] **Step 9: The first scheduled run.** After the next Monday morning, `gh run list --workflow update-chart.yml --event schedule` should show a success.
