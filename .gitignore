@@ -2,3 +2,4 @@
 __pycache__/
 .pytest_cache/
 hpc_usage_gantt.png
+.venv/

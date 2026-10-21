@@ -27,13 +27,13 @@ Three tabs, each with its header in row 1:
 Draw the chart without uploading it. This writes `hpc_usage_gantt.png`:
 
 ```bash
-SHEET_ID=<id from the sheet's URL> uv run --script hpc_gantt.py --no-upload
+SHEET_ID=<id from the sheet's URL> uv run hpc_gantt.py --no-upload
 ```
 
 Try an upload to your own Dropbox folder. This needs an rclone remote called `dropbox`:
 
 ```bash
-SHEET_ID=<id> uv run --script hpc_gantt.py --upload-to dropbox:/QuakeCoRE/<you>/hpc_usage_gantt_test.png
+SHEET_ID=<id> uv run hpc_gantt.py --upload-to dropbox:/QuakeCoRE/<you>/hpc_usage_gantt_test.png
 ```
 
 `--pretend-today-is YYYY-MM-DD` draws the chart as if it were another day.
@@ -41,7 +41,7 @@ SHEET_ID=<id> uv run --script hpc_gantt.py --upload-to dropbox:/QuakeCoRE/<you>/
 ## Tests
 
 ```bash
-uv run --no-project --python 3.14 --with pytest --with-requirements hpc_gantt.py python -m pytest -q
+uv run pytest
 ```
 
 ## The share link and the Slack reminder
@@ -75,4 +75,4 @@ A GitHub Actions workflow, [`.github/workflows/update-chart.yml`](.github/workfl
   rclone config dump | jq -j '.dropbox.token | fromjson | .refresh_token' | gh secret set DROPBOX_REFRESH_TOKEN --env dropbox --repo ucgmsim/hpc_gantt_bot
   ```
 - **Point it at another sheet:** `gh secret set SHEET_ID --env dropbox --repo ucgmsim/hpc_gantt_bot`. It prompts for the ID.
-- **After changing the script's dependencies:** run `uv lock --script hpc_gantt.py` to re-lock, and commit both files.
+- **Changing dependencies:** `uv add <package>` or `uv remove <package>`, then commit `pyproject.toml` and `uv.lock`.

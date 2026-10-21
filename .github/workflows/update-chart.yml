@@ -23,12 +23,12 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa  # v10.3.1
         with:
-          version: "0.11.28"  # the version that wrote hpc_gantt.py.lock
+          version: "0.11.28"  # the version that wrote uv.lock
           enable-cache: false
       - name: Install rclone
         run: sudo apt-get update -qq && sudo apt-get install -y -qq rclone
       - name: Draw the chart and upload it to Dropbox
-        run: uv run --script hpc_gantt.py
+        run: uv run --locked --no-dev hpc_gantt.py
         env:
           SHEET_ID: ${{ secrets.SHEET_ID }}
           RCLONE_CONFIG_DROPBOX_TYPE: dropbox

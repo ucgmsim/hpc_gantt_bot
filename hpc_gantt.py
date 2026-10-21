@@ -1,13 +1,3 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.14"
-# dependencies = [
-#   "cyclopts",
-#   "matplotlib",
-#   "openpyxl",
-#   "requests",
-# ]
-# ///
 """Draw the team's HPC usage plan as a Gantt chart and upload it to Dropbox."""
 
 import contextlib
