@@ -44,6 +44,8 @@ SHEET_ID=<id> uv run hpc_gantt.py --upload-to dropbox:/QuakeCoRE/<you>/hpc_usage
 uv run pytest
 ```
 
+Pull requests and pushes to `main` also run the team's shared checks from [ucgmsim/meta-ci-action](https://github.com/ucgmsim/meta-ci-action): ruff, deptry, npdlint (numpydoc docstrings), pytest and ty.
+
 ## The share link and the Slack reminder
 
 After the first upload, create a share link, which lets anyone with the link view the chart:
