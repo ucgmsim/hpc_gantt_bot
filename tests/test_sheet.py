@@ -1,18 +1,18 @@
-from datetime import date, datetime as D
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
-
 from helpers import EXAMPLE_TABS, MON, make_xlsx, with_runs
-from hpc_gantt import Run, SheetError, parse_schedule, read_workbook
 
-d1, d2 = D(2026, 10, 19), D(2026, 10, 23)
+from hpc_gantt import Run, Schedule, SheetError, parse_schedule, read_workbook
+
+d1, d2 = datetime(2026, 10, 19), datetime(2026, 10, 23)
 
 
 def test_read_workbook_returns_rows_by_tab():
-    xlsx = make_xlsx({"Runs": [["Person", "Start date"], ["Alex", D(2026, 10, 12)]], "People": [["Name", "Admin"], ["Alex", True]]})
+    xlsx = make_xlsx({"Runs": [["Person", "Start date"], ["Alex", datetime(2026, 10, 12)]], "People": [["Name", "Admin"], ["Alex", True]]})
     assert read_workbook(xlsx) == {
-        "Runs": [("Person", "Start date"), ("Alex", D(2026, 10, 12))],
+        "Runs": [("Person", "Start date"), ("Alex", datetime(2026, 10, 12))],
         "People": [("Name", "Admin"), ("Alex", True)],
     }
 
@@ -22,7 +22,7 @@ def test_read_workbook_rejects_a_sign_in_page():
         read_workbook(b"<html>Sign in</html>")
 
 
-def test_parse_example(example_schedule):
+def test_parse_example(example_schedule: Schedule):
     s = example_schedule
     assert [r.row for r in s.runs] == [2, 3, 4, 5]
     assert s.runs[0] == Run(2, "Alex", "Hikurangi rupture scenarios", "Mahuika", date(2026, 10, 12), date(2026, 11, 1))
@@ -59,23 +59,23 @@ def test_blank_rows_are_ignored():
     (["Alex", "x", "Mahuika", d1, None], "Row 2 (Alex, Mahuika): end date is empty"),
     (["Jamie", "x", "Kupe", d1, d2], 'Row 2 (Jamie, Kupe): "Jamie" isn\'t on the People tab; HPC "Kupe" isn\'t on the HPCs tab'),
 ])
-def test_bad_rows_are_reported_and_skipped(row, problem):
+def test_bad_rows_are_reported_and_skipped(row: list, problem: str):
     s = parse_schedule(with_runs(row), MON)
     assert (s.runs, s.problems) == ([], [problem])
 
 
 def test_rows_that_ended_before_the_first_day_are_not_checked():
-    s = parse_schedule(with_runs(["Jamie", "x", "Kupe", "early Oct", D(2026, 10, 18)]), MON)
+    s = parse_schedule(with_runs(["Jamie", "x", "Kupe", "early Oct", datetime(2026, 10, 18)]), MON)
     assert (s.runs, s.problems) == ([], [])
 
 
 def test_unreadable_end_date_is_always_reported():
-    s = parse_schedule(with_runs(["Alex", "x", "Mahuika", D(2026, 10, 1), "whenever"]), MON)
+    s = parse_schedule(with_runs(["Alex", "x", "Mahuika", datetime(2026, 10, 1), "whenever"]), MON)
     assert s.problems == ['Row 2 (Alex, Mahuika): end date "whenever" isn\'t a date']
 
 
 def test_reversed_dates_are_reported_even_when_the_end_is_past():
-    s = parse_schedule(with_runs(["Alex", "x", "Mahuika", D(2026, 12, 28), D(2026, 1, 8)]), date(2026, 12, 21))
+    s = parse_schedule(with_runs(["Alex", "x", "Mahuika", datetime(2026, 12, 28), datetime(2026, 1, 8)]), date(2026, 12, 21))
     assert (s.runs, s.problems) == ([], ["Row 2 (Alex, Mahuika): start date is after the end date"])
 
 

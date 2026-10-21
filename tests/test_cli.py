@@ -1,19 +1,20 @@
 from datetime import date
+from pathlib import Path
 
 import pytest
+from helpers import EXAMPLE_TABS, NOW, make_xlsx, png_size, with_runs
 
 import hpc_gantt
-from helpers import EXAMPLE_TABS, NOW, make_xlsx, png_size, with_runs
 from hpc_gantt import DESTINATION, SheetError, UploadError, update_chart
 
 
 @pytest.fixture
-def uploads(monkeypatch):
+def uploads(monkeypatch: pytest.MonkeyPatch):
     """Serve the example sheet, and record the destination of each upload (checking it was a PNG)."""
     sent = []
     monkeypatch.setattr(hpc_gantt, "download_workbook", lambda sheet_id: make_xlsx(EXAMPLE_TABS))
 
-    def fake_upload(local, destination):
+    def fake_upload(local: Path, destination: str):
         png_size(local)
         sent.append(destination)
 
@@ -21,18 +22,18 @@ def uploads(monkeypatch):
     return sent
 
 
-def test_no_upload_writes_the_chart(uploads, tmp_path):
+def test_no_upload_writes_the_chart(uploads: list[str], tmp_path: Path):
     assert update_chart("ID", NOW.date(), NOW, None, tmp_path / "c.png") == 0
     assert png_size(tmp_path / "c.png")[0] == 1680 and uploads == []
 
 
-def test_upload_sends_a_fresh_png(uploads):
+def test_upload_sends_a_fresh_png(uploads: list[str]):
     assert update_chart("ID", NOW.date(), NOW, "dropbox:/test/x.png", None) == 0
     assert uploads == ["dropbox:/test/x.png"]
 
 
-def test_unreadable_sheet_uploads_nothing(uploads, monkeypatch, capsys):
-    def broken(sheet_id):
+def test_unreadable_sheet_uploads_nothing(uploads: list[str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
+    def broken(sheet_id: str):
         raise SheetError("download failed with HTTP 404")
 
     monkeypatch.setattr(hpc_gantt, "download_workbook", broken)
@@ -40,8 +41,8 @@ def test_unreadable_sheet_uploads_nothing(uploads, monkeypatch, capsys):
     assert uploads == [] and "HTTP 404" in capsys.readouterr().err
 
 
-def test_upload_failure_exits_1(uploads, monkeypatch, capsys):
-    def failing(local, destination):
+def test_upload_failure_exits_1(uploads: list[str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
+    def failing(local: Path, destination: str):
         raise UploadError("rclone isn't installed (or isn't on PATH)")
 
     monkeypatch.setattr(hpc_gantt, "rclone_upload", failing)
@@ -54,7 +55,7 @@ def test_upload_failure_exits_1(uploads, monkeypatch, capsys):
     (1, "The sheet has 1 problem, listed at the bottom of the chart.\n"),
     (2, "The sheet has 2 problems, listed at the bottom of the chart.\n"),
 ])
-def test_only_the_number_of_sheet_problems_is_logged(uploads, monkeypatch, tmp_path, capsys, problem_rows, logged):
+def test_only_the_number_of_sheet_problems_is_logged(uploads: list[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], problem_rows: int, logged: str):
     # Run logs are public on GitHub, so names and sheet text stay out of them
     good = ["Alex", "x", "Mahuika", date(2026, 10, 19), date(2026, 10, 23)]
     bad = [["Jamie", "x", "Mahuika", date(2026, 10, 19), date(2026, 10, 23)],
@@ -65,7 +66,7 @@ def test_only_the_number_of_sheet_problems_is_logged(uploads, monkeypatch, tmp_p
     assert capsys.readouterr().err == logged
 
 
-def test_cli_flags(monkeypatch, tmp_path):
+def test_cli_flags(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     seen = []
     monkeypatch.setattr(hpc_gantt, "update_chart", lambda sheet_id, today, now, upload_to, output: seen.append((sheet_id, today, upload_to, output)) or 0)
     monkeypatch.setenv("SHEET_ID", "abc")
@@ -78,7 +79,7 @@ def test_cli_flags(monkeypatch, tmp_path):
     assert seen[1][2:] == (DESTINATION, None)
 
 
-def test_missing_sheet_id(monkeypatch):
+def test_missing_sheet_id(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("SHEET_ID", raising=False)
     with pytest.raises(SystemExit) as exit_info:
         hpc_gantt.app(["--no-upload"])

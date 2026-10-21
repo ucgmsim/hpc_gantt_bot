@@ -11,6 +11,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import matplotlib
@@ -19,7 +20,7 @@ import openpyxl
 import requests
 from cyclopts import App
 from matplotlib.figure import Figure
-from matplotlib.patches import BoxStyle, FancyBboxPatch, Patch
+from matplotlib.patches import FancyBboxPatch, Patch
 
 matplotlib.rcParams["text.parse_math"] = False  # sheet text like "$SCRATCH to $PROJECT" is not maths
 
@@ -37,12 +38,36 @@ TABS = {
 
 
 def week_monday(day: date) -> date:
-    """Return the Monday of the Monday-to-Sunday week that contains ``day``."""
+    """Return the Monday of the Monday-to-Sunday week that contains ``day``.
+
+    Parameters
+    ----------
+    day : date
+        Any day.
+
+    Returns
+    -------
+    date
+        The Monday on or before ``day``.
+    """
     return day - timedelta(days=day.weekday())
 
 
 def format_date_range(start: date, end: date) -> str:
-    """Format a range spanning months, e.g. ``5 Oct – 17 Jan``, naming the years only if they differ."""
+    """Format a range of days, naming the years only if they differ.
+
+    Parameters
+    ----------
+    start : date
+        The first day of the range.
+    end : date
+        The last day of the range.
+
+    Returns
+    -------
+    str
+        E.g. ``5 Oct – 28 Dec`` within one year, or ``5 Oct 2026 – 17 Jan 2027`` across two.
+    """
     month = "%b" if start.year == end.year else "%b %Y"
     return f"{start.day} {start:{month}} – {end.day} {end:{month}}"
 
@@ -56,17 +81,45 @@ class SheetError(Exception):
 
 @dataclass(frozen=True)
 class Run:
-    row: int  # the sheet's own row number (header = 1)
-    person: str  # as written on the People tab
+    """One usable row of the Runs tab.
+
+    Parameters
+    ----------
+    row : int
+        The sheet's own row number (the header is row 1).
+    person : str
+        The person, as written on the People tab.
+    description : str
+        What the run is for; may be empty.
+    hpc : str
+        The HPC, as written on the HPCs tab.
+    start : date
+        The first day of the run.
+    end : date
+        The last day of the run (inclusive).
+    """
+
+    row: int
+    person: str
     description: str
-    hpc: str  # as written on the HPCs tab
+    hpc: str
     start: date
-    end: date  # inclusive
+    end: date
 
 
 @dataclass(frozen=True)
 class Schedule:
-    """The usable contents of the sheet, plus a line for everything that wasn't usable."""
+    """The usable contents of the sheet, plus a line for everything that wasn't usable.
+
+    Parameters
+    ----------
+    hpcs : list[str]
+        The HPCs, in the order of the HPCs tab.
+    runs : list[Run]
+        The usable runs that end on or after the chart's first day, in sheet order.
+    problems : list[str]
+        One line per problem found in the sheet.
+    """
 
     hpcs: list[str]
     runs: list[Run]
@@ -77,6 +130,21 @@ def download_workbook(sheet_id: str) -> bytes:
     """Download the planning sheet as .xlsx, without credentials (it is link-shared).
 
     Network failures and 429/5xx responses are tried three times in all, five seconds apart.
+
+    Parameters
+    ----------
+    sheet_id : str
+        The ID from the sheet's URL.
+
+    Returns
+    -------
+    bytes
+        The downloaded .xlsx file.
+
+    Raises
+    ------
+    SheetError
+        If the download fails, or returns something other than a spreadsheet.
     """
     url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
     for attempt in range(3):
@@ -102,7 +170,23 @@ def download_workbook(sheet_id: str) -> bytes:
 
 
 def read_workbook(xlsx: bytes) -> dict[str, list[tuple]]:
-    """Return every tab of an .xlsx file as a list of row tuples, header row included."""
+    """Return every tab of an .xlsx file as a list of row tuples, header row included.
+
+    Parameters
+    ----------
+    xlsx : bytes
+        The .xlsx file.
+
+    Returns
+    -------
+    dict[str, list[tuple]]
+        Each tab's title and its rows.
+
+    Raises
+    ------
+    SheetError
+        If the file can't be opened as a spreadsheet.
+    """
     try:
         with contextlib.closing(openpyxl.load_workbook(io.BytesIO(xlsx), read_only=True, data_only=True)) as workbook:
             return {sheet.title: list(sheet.iter_rows(values_only=True)) for sheet in workbook.worksheets}
@@ -111,16 +195,50 @@ def read_workbook(xlsx: bytes) -> dict[str, list[tuple]]:
 
 
 def _text(value: object) -> str:
-    """Cell text on one line: line breaks and runs of spaces become single spaces."""
+    """Cell text on one line: line breaks and runs of spaces become single spaces.
+
+    Parameters
+    ----------
+    value : object
+        A cell's value; None for an empty cell.
+
+    Returns
+    -------
+    str
+        The text, or "" for an empty cell.
+    """
     return "" if value is None else " ".join(str(value).split())
 
 
 def _key(value: object) -> str:
-    """Normalise a name for matching, ignoring case and surrounding spaces."""
+    """Normalise a name for matching, ignoring case and surrounding spaces.
+
+    Parameters
+    ----------
+    value : object
+        A cell's value.
+
+    Returns
+    -------
+    str
+        The key to match names by.
+    """
     return _text(value).casefold()
 
 
 def _as_date(value: object) -> date | None:
+    """Read a cell as a date.
+
+    Parameters
+    ----------
+    value : object
+        A cell's value. Dates from Google Sheets arrive as datetimes.
+
+    Returns
+    -------
+    date or None
+        The date, or None if the cell doesn't hold one.
+    """
     if isinstance(value, datetime):
         return value.date()
     if isinstance(value, date):
@@ -134,6 +252,18 @@ def _records(
     """Return each tab's data rows as (sheet row number, {column: value}).
 
     A missing tab or column is added to ``problems`` and that tab is treated as empty.
+
+    Parameters
+    ----------
+    tabs : Mapping[str, Sequence[Sequence[object]]]
+        Tab title to rows, as returned by `read_workbook`.
+    problems : list[str]
+        Where to add a line for each missing tab or column.
+
+    Returns
+    -------
+    dict[str, list[tuple[int, dict[str, object]]]]
+        Each tab in ``TABS`` and its data rows, holding only the columns the bot reads.
     """
     by_key = {_key(title): rows for title, rows in tabs.items()}
     records = {}
@@ -158,7 +288,24 @@ def _records(
 
 
 def _names(records: list[tuple[int, dict[str, object]]], column: str, tab: str, problems: list[str]) -> dict[str, str]:
-    """Collect the names in one column of a list tab, keyed for matching; repeats become problems."""
+    """Collect the names in one column of a list tab, keyed for matching; repeats become problems.
+
+    Parameters
+    ----------
+    records : list[tuple[int, dict[str, object]]]
+        The tab's rows, as returned by `_records`.
+    column : str
+        The column holding the names.
+    tab : str
+        The tab's name, for problem lines.
+    problems : list[str]
+        Where to add a line for each repeated name.
+
+    Returns
+    -------
+    dict[str, str]
+        Each name as written, by its matching key.
+    """
     names: dict[str, str] = {}
     for number, record in records:
         name = _text(record[column])
@@ -176,10 +323,15 @@ def parse_schedule(tabs: Mapping[str, Sequence[Sequence[object]]], first_day: da
 
     Parameters
     ----------
-    tabs
+    tabs : Mapping[str, Sequence[Sequence[object]]]
         Tab title to rows, as returned by `read_workbook`.
-    first_day
+    first_day : date
         First day the chart shows. Runs that ended before it are ignored unchecked.
+
+    Returns
+    -------
+    Schedule
+        The usable HPCs and runs, and a line for each problem.
     """
     problems: list[str] = []
     records = _records(tabs, problems)
@@ -215,6 +367,7 @@ def parse_schedule(tabs: Mapping[str, Sequence[Sequence[object]]], first_day: da
         if reasons:
             problems.append(f"Row {number} ({person_text or '?'}, {hpc_text or '?'}): {'; '.join(reasons)}")
         else:
+            assert person and hpc and start and end  # every check above passed
             runs.append(Run(number, person, _text(record["Description"]), hpc, start, end))
 
     return Schedule(list(hpcs.values()), runs, problems)
@@ -225,31 +378,79 @@ def parse_schedule(tabs: Mapping[str, Sequence[Sequence[object]]], first_day: da
 
 @dataclass(frozen=True)
 class Bar:
-    """One run as drawn: its whole span (the plot clips it to the chart) and its caption."""
+    """One run as drawn: its whole span (the plot clips it to the chart) and its caption.
 
-    row: int  # 0 = top row of the chart
-    start: date  # the run's first day
-    end: date  # the day after the run's last day
-    finished: bool  # the run ended before today
+    Parameters
+    ----------
+    row : int
+        The chart row, 0 being the top.
+    start : date
+        The run's first day.
+    end : date
+        The day after the run's last day.
+    finished : bool
+        Whether the run ended before today.
+    caption : str
+        The text shown above the bar.
+    label_x : date
+        Where the caption is anchored, always inside the chart.
+    label_align : str
+        "left" or "right".
+    """
+
+    row: int
+    start: date
+    end: date
+    finished: bool
     caption: str
-    label_x: date  # where the caption is anchored, always inside the chart
-    label_align: str  # "left" or "right"
+    label_x: date
+    label_align: str
 
 
 @dataclass(frozen=True)
 class Lane:
+    """One HPC's band of rows.
+
+    Parameters
+    ----------
+    hpc : str
+        The HPC's name.
+    top_row : int
+        The lane's first chart row.
+    rows : int
+        How many rows it has: at least 1, as an empty lane still gets a row.
+    empty : bool
+        Whether no runs fall within the chart.
+    """
+
     hpc: str
     top_row: int
-    rows: int  # at least 1: an empty lane still gets a row
+    rows: int
     empty: bool
 
 
 @dataclass(frozen=True)
 class Layout:
-    """Everything the chart shows, worked out before anything is drawn."""
+    """Everything the chart shows, worked out before anything is drawn.
+
+    Parameters
+    ----------
+    first_day : date
+        The first day shown.
+    end : date
+        The day after the last day shown.
+    today : date
+        Where the today line goes.
+    lanes : list[Lane]
+        One lane per HPC, top to bottom.
+    bars : list[Bar]
+        One bar per run within the chart.
+    problems : list[str]
+        Problems in the sheet, listed under the chart.
+    """
 
     first_day: date
-    end: date  # the day after the last day shown
+    end: date
     today: date
     lanes: list[Lane]
     bars: list[Bar]
@@ -257,23 +458,71 @@ class Layout:
 
     @property
     def rows(self) -> int:
+        """Count the chart's rows.
+
+        Returns
+        -------
+        int
+            The rows of every lane together.
+        """
         return sum(lane.rows for lane in self.lanes)
 
 
 def chart_window(today: date) -> tuple[date, date]:
-    """Return (first day, day after the last day): from 2 weeks before this week's Monday to 13 weeks after it."""
+    """Return the chart's span: from 2 weeks before this week's Monday to 13 weeks after it.
+
+    Parameters
+    ----------
+    today : date
+        The day the chart is drawn for.
+
+    Returns
+    -------
+    first_day : date
+        The first day shown.
+    end : date
+        The day after the last day shown.
+    """
     monday = week_monday(today)
     return monday - timedelta(weeks=2), monday + timedelta(weeks=13)
 
 
 def caption(person: str, description: str, max_chars: int = 60) -> str:
-    """The text shown with a run's bar, shortened with "…" if it is too long."""
+    """The text shown with a run's bar, shortened with "…" if it is too long.
+
+    Parameters
+    ----------
+    person : str
+        Who the run belongs to.
+    description : str
+        What it's for; may be empty.
+    max_chars : int, default 60
+        The longest caption allowed, "…" included.
+
+    Returns
+    -------
+    str
+        The person and the description, joined by " · ", or just the person if there's no description.
+    """
     text = f"{person} · {description}" if description else person
     return text if len(text) <= max_chars else text[: max_chars - 1] + "…"
 
 
 def layout_chart(schedule: Schedule, today: date) -> Layout:
-    """Give every run that falls within the chart its own row, grouped into one lane per HPC."""
+    """Give every run that falls within the chart its own row, grouped into one lane per HPC.
+
+    Parameters
+    ----------
+    schedule : Schedule
+        The checked sheet.
+    today : date
+        The day the chart is drawn for.
+
+    Returns
+    -------
+    Layout
+        The lanes, bars and problems to draw.
+    """
     first_day, end = chart_window(today)
     late = first_day + timedelta(days=70)  # bars starting this late get right-aligned captions
     lanes, bars, row = [], [], 0
@@ -310,22 +559,63 @@ TOP = 1.45  # inches above the plot: title, subtitle, legend, week labels and "t
 
 # Text drawn over the plot sits on a patch of background, above every line, so gridlines and the today line
 # never cross it. The stacking order is: week lines 0, lane dividers 1, bars 2, today line 3, text 5.
-OVER_PLOT_TEXT = {"bbox": {"boxstyle": "square,pad=0.15", "facecolor": SURFACE, "edgecolor": "none"}, "zorder": 5}
+OVER_PLOT_TEXT: dict[str, Any] = {
+    "bbox": {"boxstyle": "square,pad=0.15", "facecolor": SURFACE, "edgecolor": "none"}, "zorder": 5,
+}
 
 
 def _pt(pixels: float) -> float:
-    """Convert pixels to points at the chart's resolution, for line widths."""
+    """Convert pixels to points at the chart's resolution, for line widths.
+
+    Parameters
+    ----------
+    pixels : float
+        A length in pixels.
+
+    Returns
+    -------
+    float
+        The same length in points.
+    """
     return pixels * 72 / DPI
 
 
 def chart_subtitle(first_day: date, end: date, updated: datetime) -> str:
-    """The line under the title: when the chart was made and which dates it shows."""
+    """The line under the title: when the chart was made and which dates it shows.
+
+    Parameters
+    ----------
+    first_day : date
+        The first day shown.
+    end : date
+        The day after the last day shown.
+    updated : datetime
+        When the chart was made, in NZ time.
+
+    Returns
+    -------
+    str
+        E.g. "Updated Tue 20 Oct 2026, 14:00 NZDT · showing 5 Oct 2026 – 17 Jan 2027".
+    """
     stamp = f"{updated:%a} {updated.day} {updated:%b %Y, %H:%M %Z}"
     return f"Updated {stamp} · showing {format_date_range(first_day, end - timedelta(days=1))}"
 
 
 def footer_lines(problems: list[str], limit: int = 8) -> list[str]:
-    """The small print under the chart, listing at most ``limit`` problems in the sheet."""
+    """The small print under the chart, listing at most ``limit`` problems in the sheet.
+
+    Parameters
+    ----------
+    problems : list[str]
+        Problems in the sheet.
+    limit : int, default 8
+        How many to list before "…and N more".
+
+    Returns
+    -------
+    list[str]
+        The lines, or none if there are no problems.
+    """
     if not problems:
         return []
     lines = ["Problems in the sheet:", *problems[:limit]]
@@ -335,7 +625,17 @@ def footer_lines(problems: list[str], limit: int = 8) -> list[str]:
 
 
 def draw_chart(layout: Layout, updated: datetime, output: Path) -> None:
-    """Draw the layout as a PNG Gantt chart at ``output``."""
+    """Draw the layout as a PNG Gantt chart at ``output``.
+
+    Parameters
+    ----------
+    layout : Layout
+        What to draw.
+    updated : datetime
+        When the chart was made, shown in the subtitle.
+    output : Path
+        Where to write the PNG.
+    """
     rows = max(layout.rows, 1)
     footer = footer_lines(layout.problems)
     bottom = 0.3 + 0.17 * len(footer) + 0.3  # inches below the plot: problems, then the source line
@@ -380,7 +680,7 @@ def draw_chart(layout: Layout, updated: datetime, output: Path) -> None:
         left, right = mdates.date2num(bar.start), mdates.date2num(bar.end)
         ax.add_patch(FancyBboxPatch(
             (left, bar.row + 0.62), right - left, 10 * y_per_px,
-            boxstyle=BoxStyle.Round(pad=0, rounding_size=4 * x_per_px), mutation_aspect=y_per_px / x_per_px,
+            boxstyle=f"round,pad=0,rounding_size={4 * x_per_px}", mutation_aspect=y_per_px / x_per_px,
             facecolor=FINISHED if bar.finished else CURRENT, edgecolor="none", linewidth=0, zorder=2,
         ))
         ax.text(mdates.date2num(bar.label_x), bar.row + 0.55, bar.caption, ha=bar.label_align, va="bottom",
@@ -421,7 +721,22 @@ class UploadError(Exception):
 
 
 def rclone_upload(local: Path, destination: str, run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> None:
-    """Copy ``local`` to ``destination``, an rclone path such as ``dropbox:/QuakeCoRE/hpc_usage_gantt.png``."""
+    """Copy ``local`` to ``destination``, an rclone path such as ``dropbox:/QuakeCoRE/hpc_usage_gantt.png``.
+
+    Parameters
+    ----------
+    local : Path
+        The file to upload.
+    destination : str
+        The rclone path to write it to, replacing any file already there.
+    run : callable, default subprocess.run
+        Runs the rclone command; tests pass a fake.
+
+    Raises
+    ------
+    UploadError
+        If rclone is missing, times out or fails.
+    """
     try:
         result = run(["rclone", "copyto", str(local), destination], capture_output=True, text=True, timeout=300)
     except FileNotFoundError as exc:
@@ -440,7 +755,26 @@ DEFAULT_OUTPUT = Path("hpc_usage_gantt.png")
 
 
 def update_chart(sheet_id: str, today: date, now: datetime, upload_to: str | None, output: Path | None) -> int:
-    """Download the sheet, draw the chart and, unless ``upload_to`` is None, upload it. Returns the exit code."""
+    """Download the sheet, draw the chart and, unless ``upload_to`` is None, upload it.
+
+    Parameters
+    ----------
+    sheet_id : str
+        The ID from the sheet's URL.
+    today : date
+        The day the chart is drawn for.
+    now : datetime
+        When the chart is made, shown in the subtitle.
+    upload_to : str or None
+        The rclone path to upload to, or None to only draw the chart.
+    output : Path or None
+        Where to write the PNG. None means ``hpc_usage_gantt.png`` when only drawing, otherwise a temporary file.
+
+    Returns
+    -------
+    int
+        The exit code: 0 on success, 1 if the sheet couldn't be read or the upload failed.
+    """
     try:
         tabs = read_workbook(download_workbook(sheet_id))
     except SheetError as error:
@@ -479,14 +813,19 @@ def main(*, upload: bool = True, output: Path | None = None, upload_to: str = DE
 
     Parameters
     ----------
-    upload
+    upload : bool, default True
         Upload the chart. With --no-upload it is only drawn, into --output.
-    output
+    output : Path or None, optional
         Where to write the PNG. Default: hpc_usage_gantt.png with --no-upload, otherwise a temporary file.
-    upload_to
+    upload_to : str, default DESTINATION
         The rclone destination to upload to.
-    pretend_today_is
+    pretend_today_is : date or None, optional
         Draw the chart as if today were this date (YYYY-MM-DD), for testing.
+
+    Returns
+    -------
+    int
+        The exit code.
     """
     sheet_id = os.environ.get("SHEET_ID")
     if not sheet_id:

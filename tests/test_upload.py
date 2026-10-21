@@ -5,10 +5,11 @@ import pytest
 
 from hpc_gantt import DESTINATION, UploadError, rclone_upload
 
+
 def test_upload_runs_rclone_copyto():
     calls = []
 
-    def run(args, **kwargs):
+    def run(args: list[str], **kwargs):
         calls.append((args, kwargs))
         return subprocess.CompletedProcess(args, 0, "", "")
 
@@ -17,7 +18,7 @@ def test_upload_runs_rclone_copyto():
 
 
 def test_missing_rclone_is_explained():
-    def run(args, **kwargs):
+    def run(args: list[str], **kwargs):
         raise FileNotFoundError("rclone")
 
     with pytest.raises(UploadError, match="rclone isn't installed"):
@@ -25,7 +26,7 @@ def test_missing_rclone_is_explained():
 
 
 def test_rclone_failure_shows_its_last_error_line():
-    def run(args, **kwargs):
+    def run(args: list[str], **kwargs):
         return subprocess.CompletedProcess(args, 1, "", "2026/10/20 NOTICE: x\n2026/10/20 ERROR : token expired\n\n")
 
     with pytest.raises(UploadError, match="rclone failed: 2026/10/20 ERROR : token expired$"):
@@ -33,7 +34,7 @@ def test_rclone_failure_shows_its_last_error_line():
 
 
 def test_rclone_timeout_is_explained():
-    def run(args, **kwargs):
+    def run(args: list[str], **kwargs):
         raise subprocess.TimeoutExpired(args, 300)
 
     with pytest.raises(UploadError, match="timed out"):

@@ -1,6 +1,7 @@
 from datetime import date
 
 from helpers import TUE
+
 from hpc_gantt import Bar, Lane, Run, Schedule, caption, chart_window, layout_chart
 
 
@@ -9,12 +10,12 @@ def test_chart_window():
     assert chart_window(date(2026, 10, 25)) == (date(2026, 10, 5), date(2027, 1, 18))
 
 
-def test_lanes_follow_the_hpcs_tab(example_schedule):
+def test_lanes_follow_the_hpcs_tab(example_schedule: Schedule):
     assert layout_chart(example_schedule, TUE).lanes == [
         Lane("Mahuika", 0, 2, False), Lane("Frontera", 2, 1, False), Lane("Setonix", 3, 1, False), Lane("Test cluster", 4, 1, True)]
 
 
-def test_bars(example_schedule):
+def test_bars(example_schedule: Schedule):
     layout = layout_chart(example_schedule, TUE)
     assert layout.rows == 5 and layout.problems == example_schedule.problems
     assert layout.bars == [
@@ -25,7 +26,7 @@ def test_bars(example_schedule):
     ]
 
 
-def test_finished_runs(example_schedule):
+def test_finished_runs(example_schedule: Schedule):
     bars = layout_chart(example_schedule, date(2026, 10, 26)).bars
     assert [(b.caption.split(" ·")[0], b.finished) for b in bars] == [
         ("Alex", False), ("Jordan", False), ("Sam", True), ("Riley", False)]
