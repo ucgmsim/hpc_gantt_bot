@@ -26,7 +26,6 @@ def test_parse_example(example_schedule):
     s = example_schedule
     assert [r.row for r in s.runs] == [2, 3, 4, 5]
     assert s.runs[0] == Run(2, "Alex", "Hikurangi rupture scenarios", "Mahuika", date(2026, 10, 12), date(2026, 11, 1))
-    assert s.people == ["Alex", "Sam", "Jordan", "Riley", "Casey", "Morgan"]
     assert s.hpcs == ["Mahuika", "Frontera", "Setonix", "Test cluster"]
     assert s.problems == ['Row 6 (Casey, Frontera): start date "early Nov" isn\'t a date']
 
@@ -41,7 +40,7 @@ def test_extra_columns_and_tab_spelling_are_ignored():
             "people": [["Slack member ID", " NAME ", "Admin"], ["U04ABC1DEF", "Alex", True]],
             "HPCs": [["Alert if idle", "HPC"], [True, "Mahuika"]]}
     s = parse_schedule(tabs, MON)
-    assert (s.people, s.hpcs, s.problems) == (["Alex"], ["Mahuika"], [])
+    assert (s.hpcs, s.problems) == (["Mahuika"], [])
 
 
 def test_blank_rows_are_ignored():
@@ -94,7 +93,7 @@ def test_sheet_level_problems():
 def test_real_google_export():
     tabs = read_workbook((Path(__file__).parent / "fixtures" / "google_export.xlsx").read_bytes())
     s = parse_schedule(tabs, MON)
-    assert (s.people, s.hpcs, s.runs) == ([], [], [])
+    assert (s.hpcs, s.runs) == ([], [])
     assert s.problems == ["Row 2 (?, ?): no person given; no HPC given"]
 
 

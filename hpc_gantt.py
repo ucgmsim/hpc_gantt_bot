@@ -10,6 +10,7 @@
 # ///
 """Draw the team's HPC usage plan as a Gantt chart and upload it to Dropbox."""
 
+import contextlib
 import io
 import os
 import subprocess
@@ -23,16 +24,14 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import matplotlib
-
-matplotlib.use("Agg")  # draw to files only; mantle has no display
-matplotlib.rcParams["text.parse_math"] = False  # sheet text like "$SCRATCH to $PROJECT" is not maths
-
 import matplotlib.dates as mdates
-import matplotlib.pyplot as plt
 import openpyxl
 import requests
 from cyclopts import App
+from matplotlib.figure import Figure
 from matplotlib.patches import BoxStyle, FancyBboxPatch, Patch
+
+matplotlib.rcParams["text.parse_math"] = False  # sheet text like "$SCRATCH to $PROJECT" is not maths
 
 NZ = ZoneInfo("Pacific/Auckland")
 
@@ -53,19 +52,9 @@ def week_monday(day: date) -> date:
 
 
 def format_date_range(start: date, end: date) -> str:
-    """Format an inclusive date range, e.g. ``12 Oct – 1 Nov``, naming months and years only as needed."""
-    if start == end:
-        return f"{start.day} {start:%b}"
-    if start.year != end.year:
-        return f"{start.day} {start:%b %Y} – {end.day} {end:%b %Y}"
-    if start.month != end.month:
-        return f"{start.day} {start:%b} – {end.day} {end:%b}"
-    return f"{start.day} – {end.day} {end:%b}"
-
-
-def nz_today(now: datetime | None = None) -> date:
-    """Return today's date in New Zealand (``now`` must be timezone-aware)."""
-    return (now or datetime.now(NZ)).astimezone(NZ).date()
+    """Format a range spanning months, e.g. ``5 Oct – 17 Jan``, naming the years only if they differ."""
+    month = "%b" if start.year == end.year else "%b %Y"
+    return f"{start.day} {start:{month}} – {end.day} {end:{month}}"
 
 
 # ---------------------------------------------------------------- the sheet
@@ -89,47 +78,32 @@ class Run:
 class Schedule:
     """The usable contents of the sheet, plus a line for everything that wasn't usable."""
 
-    people: list[str]
     hpcs: list[str]
     runs: list[Run]
     problems: list[str]
 
 
-class _Transient(Exception):
-    """An HTTP response worth retrying (429 or 5xx)."""
-
-    def __init__(self, status_code: int):
-        super().__init__(f"HTTP {status_code}")
-        self.status_code = status_code
-
-
-def _checked(response: requests.Response) -> requests.Response:
-    if response.status_code == 429 or response.status_code >= 500:
-        raise _Transient(response.status_code)
-    return response
-
-
-def with_retries[T](call: Callable[[], T], attempts: int = 3, wait_seconds: float = 5.0) -> T:
-    """Run ``call``, retrying network failures and 429/5xx responses."""
-    for attempt in range(1, attempts + 1):
-        try:
-            return call()
-        except (requests.ConnectionError, requests.Timeout, _Transient):
-            if attempt == attempts:
-                raise
-            time.sleep(wait_seconds)
-    raise AssertionError("attempts must be at least 1")
-
-
 def download_workbook(sheet_id: str) -> bytes:
-    """Download the planning sheet as .xlsx, without credentials (it is link-shared)."""
+    """Download the planning sheet as .xlsx, without credentials (it is link-shared).
+
+    Network failures and 429/5xx responses are tried three times in all, five seconds apart.
+    """
     url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
-    try:
-        response = with_retries(lambda: _checked(requests.get(url, timeout=30)))
-    except _Transient as exc:
-        raise SheetError(f"download failed with HTTP {exc.status_code}") from exc
-    except requests.RequestException as exc:
-        raise SheetError(f"download failed: {exc}") from exc
+    for attempt in range(3):
+        if attempt:
+            time.sleep(5)
+        try:
+            response = requests.get(url, timeout=30)
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            failure = f"download failed: {exc}"
+        except requests.RequestException as exc:
+            raise SheetError(f"download failed: {exc}") from exc
+        else:
+            if response.status_code != 429 and response.status_code < 500:
+                break
+            failure = f"download failed with HTTP {response.status_code}"
+    else:
+        raise SheetError(failure)
     if response.status_code != 200:
         raise SheetError(f"download failed with HTTP {response.status_code}")
     if "spreadsheetml" not in response.headers.get("Content-Type", ""):
@@ -140,11 +114,8 @@ def download_workbook(sheet_id: str) -> bytes:
 def read_workbook(xlsx: bytes) -> dict[str, list[tuple]]:
     """Return every tab of an .xlsx file as a list of row tuples, header row included."""
     try:
-        workbook = openpyxl.load_workbook(io.BytesIO(xlsx), read_only=True, data_only=True)
-        try:
+        with contextlib.closing(openpyxl.load_workbook(io.BytesIO(xlsx), read_only=True, data_only=True)) as workbook:
             return {sheet.title: list(sheet.iter_rows(values_only=True)) for sheet in workbook.worksheets}
-        finally:
-            workbook.close()
     except Exception as exc:
         raise SheetError(f"couldn't open the downloaded spreadsheet: {exc}") from exc
 
@@ -256,7 +227,7 @@ def parse_schedule(tabs: Mapping[str, Sequence[Sequence[object]]], first_day: da
         else:
             runs.append(Run(number, person, _text(record["Description"]), hpc, start, end))
 
-    return Schedule(list(people.values()), list(hpcs.values()), runs, problems)
+    return Schedule(list(hpcs.values()), runs, problems)
 
 
 # ---------------------------------------------------------------- chart layout
@@ -264,16 +235,14 @@ def parse_schedule(tabs: Mapping[str, Sequence[Sequence[object]]], first_day: da
 
 @dataclass(frozen=True)
 class Bar:
-    """One run as drawn: its dates cut to the chart, plus its caption and where the caption goes."""
+    """One run as drawn: its whole span (the plot clips it to the chart) and its caption."""
 
     row: int  # 0 = top row of the chart
-    start: date  # first day drawn
-    end: date  # day after the last day drawn
-    cut_start: bool  # the run began before the chart's first day
-    cut_end: bool  # the run continues past the chart's end
+    start: date  # the run's first day
+    end: date  # the day after the run's last day
     finished: bool  # the run ended before today
     caption: str
-    label_x: date  # where the caption is anchored
+    label_x: date  # where the caption is anchored, always inside the chart
     label_align: str  # "left" or "right"
 
 
@@ -321,20 +290,18 @@ def layout_chart(schedule: Schedule, today: date) -> Layout:
     for hpc in schedule.hpcs:
         runs = sorted(
             (run for run in schedule.runs if run.hpc == hpc and run.start < end and run.end >= first_day),
-            key=lambda run: (run.start, run.person.casefold(), run.row),
+            key=lambda run: (run.start, _key(run.person), run.row),
         )
         lanes.append(Lane(hpc, row, max(len(runs), 1), not runs))
-        for run in runs:
+        for i, run in enumerate(runs):
             day_after = run.end + timedelta(days=1)
-            start, stop = max(run.start, first_day), min(day_after, end)
-            right = start >= late
+            shown_start, shown_end = max(run.start, first_day), min(day_after, end)
+            right = shown_start >= late
             bars.append(Bar(
-                row, start, stop, run.start < first_day, day_after > end, run.end < today,
-                caption(run.person, run.description), stop if right else start, "right" if right else "left",
+                row + i, run.start, day_after, run.end < today, caption(run.person, run.description),
+                shown_end if right else shown_start, "right" if right else "left",
             ))
-            row += 1
-        if not runs:
-            row += 1
+        row += lanes[-1].rows
     return Layout(first_day, end, today, lanes, bars, schedule.problems)
 
 
@@ -351,9 +318,9 @@ ROW = 0.42  # inches per row
 LEFT, RIGHT = 1.7, 0.35  # inches beside the plot: HPC names on the left, breathing room on the right
 TOP = 1.45  # inches above the plot: title, subtitle, legend, week labels and "today"
 
-
-# Text drawn over the plot sits on a patch of background, so gridlines and the today line never cross it.
-TEXT_BACKGROUND = {"boxstyle": "square,pad=0.15", "facecolor": SURFACE, "edgecolor": "none"}
+# Text drawn over the plot sits on a patch of background, above every line, so gridlines and the today line
+# never cross it. The stacking order is: week lines 0, lane dividers 1, bars 2, today line 3, text 5.
+OVER_PLOT_TEXT = {"bbox": {"boxstyle": "square,pad=0.15", "facecolor": SURFACE, "edgecolor": "none"}, "zorder": 5}
 
 
 def _pt(pixels: float) -> float:
@@ -383,22 +350,22 @@ def draw_chart(layout: Layout, updated: datetime, output: Path) -> None:
     footer = footer_lines(layout.problems)
     bottom = 0.3 + 0.17 * len(footer) + 0.3  # inches below the plot: problems, then the source line
     height = TOP + rows * ROW + bottom
-    fig = plt.figure(figsize=(WIDTH, height), dpi=DPI, facecolor=SURFACE)
+    fig = Figure(figsize=(WIDTH, height), dpi=DPI, facecolor=SURFACE)
     ax = fig.add_axes((LEFT / WIDTH, bottom / height, 1 - (LEFT + RIGHT) / WIDTH, rows * ROW / height))
     ax.set_facecolor(SURFACE)
     x0, x1 = mdates.date2num(layout.first_day), mdates.date2num(layout.end)
     ax.set_xlim(x0, x1)
     ax.set_ylim(rows, 0)  # row 0 at the top
-    for spine in ax.spines.values():
-        spine.set_visible(False)
+    ax.spines[:].set_visible(False)
     ax.set_yticks([])
 
     # Week lines at every Monday, labelled along the top.
     mondays = [layout.first_day + timedelta(weeks=i) for i in range((layout.end - layout.first_day).days // 7)]
-    for monday in mondays:
-        ax.axvline(mdates.date2num(monday), color=GRIDLINE, linewidth=_pt(1), zorder=0)
+    week_x = mdates.date2num(mondays)
+    for x in week_x:
+        ax.axvline(x, color=GRIDLINE, linewidth=_pt(1), zorder=0)
     ax.xaxis.tick_top()
-    ax.set_xticks([mdates.date2num(m) for m in mondays], [f"{m.day} {m:%b}" for m in mondays])
+    ax.set_xticks(week_x, [f"{m.day} {m:%b}" for m in mondays])
     ax.tick_params(axis="x", length=0, pad=14, labelsize=8, labelcolor=INK_MUTED)
 
     # Lanes: the HPC name on the left, a divider between lanes, and a note in empty ones.
@@ -410,24 +377,24 @@ def draw_chart(layout: Layout, updated: datetime, output: Path) -> None:
                 fontsize=10, fontweight="bold", color=INK)
         if lane.empty:
             ax.text(x0 + 0.5, lane.top_row + 0.5, "nothing planned", ha="left", va="center",
-                    fontsize=9, style="italic", color=INK_MUTED, bbox=TEXT_BACKGROUND, zorder=5)
+                    fontsize=9, style="italic", color=INK_MUTED, **OVER_PLOT_TEXT)
     if not layout.lanes:
         ax.text(0.5, 0.5, "No HPCs listed yet. Add them to the HPCs tab of the sheet.", transform=ax.transAxes,
-                ha="center", va="center", fontsize=11, color=INK_SECONDARY, bbox=TEXT_BACKGROUND, zorder=5)
+                ha="center", va="center", fontsize=11, color=INK_SECONDARY, **OVER_PLOT_TEXT)
 
-    # Bars: thin, with 4 px rounded ends. A cut end runs past the plot edge, where clipping squares it off.
-    x_per_px = (x1 - x0) / ((WIDTH - LEFT - RIGHT) * DPI)
-    y_per_px = 1 / (ROW * DPI)
+    # Bars: thin, with 4 px rounded ends. A run reaching past the chart is drawn whole and clipped by the plot,
+    # which squares off its cut ends.
+    x_per_px = (x1 - x0) / ax.bbox.width
+    y_per_px = rows / ax.bbox.height
     for bar in layout.bars:
-        left = mdates.date2num(bar.start) - (6 * x_per_px if bar.cut_start else 0)
-        right = mdates.date2num(bar.end) + (6 * x_per_px if bar.cut_end else 0)
+        left, right = mdates.date2num(bar.start), mdates.date2num(bar.end)
         ax.add_patch(FancyBboxPatch(
             (left, bar.row + 0.62), right - left, 10 * y_per_px,
             boxstyle=BoxStyle.Round(pad=0, rounding_size=4 * x_per_px), mutation_aspect=y_per_px / x_per_px,
             facecolor=FINISHED if bar.finished else CURRENT, edgecolor="none", linewidth=0, zorder=2,
         ))
         ax.text(mdates.date2num(bar.label_x), bar.row + 0.55, bar.caption, ha=bar.label_align, va="bottom",
-                fontsize=9, color=INK, bbox=TEXT_BACKGROUND, zorder=5)
+                fontsize=9, color=INK, **OVER_PLOT_TEXT)
 
     # Today: a line at the start of today, so every finished bar ends at or before it.
     today = mdates.date2num(layout.today)
@@ -454,7 +421,6 @@ def draw_chart(layout: Layout, updated: datetime, output: Path) -> None:
              fontsize=8, color=INK_MUTED)
 
     fig.savefig(output, dpi=DPI, facecolor=SURFACE)
-    plt.close(fig)
 
 
 # ---------------------------------------------------------------- upload
@@ -471,7 +437,7 @@ def rclone_upload(local: Path, destination: str, run: Callable[..., subprocess.C
     except FileNotFoundError as exc:
         raise UploadError("rclone isn't installed (or isn't on PATH)") from exc
     except subprocess.TimeoutExpired as exc:
-        raise UploadError("rclone timed out after 5 minutes") from exc
+        raise UploadError(f"rclone timed out after {exc.timeout / 60:g} minutes") from exc
     if result.returncode != 0:
         errors = [line.strip() for line in result.stderr.splitlines() if line.strip()]
         raise UploadError(f"rclone failed: {errors[-1] if errors else f'exit code {result.returncode}'}")
@@ -536,7 +502,7 @@ def main(*, upload: bool = True, output: Path | None = None, upload_to: str = DE
         print("SHEET_ID isn't set", file=sys.stderr)
         return 1
     now = datetime.now(NZ)
-    today = pretend_today_is or nz_today(now)
+    today = pretend_today_is or now.date()
     return update_chart(sheet_id, today, now, upload_to if upload else None, output)
 
 

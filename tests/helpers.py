@@ -1,11 +1,16 @@
 """Shared test data and helpers."""
 
 import io
+import struct
 from datetime import date, datetime as D
 
 import openpyxl
 
+from hpc_gantt import NZ
+
 MON = date(2026, 10, 19)
+TUE = date(2026, 10, 20)
+NOW = D(2026, 10, 20, 14, 0, tzinfo=NZ)
 
 # The example sheet from the design spec, with the tidied People and HPCs tabs.
 EXAMPLE_TABS = {
@@ -40,8 +45,8 @@ def with_runs(*rows):
     return {**EXAMPLE_TABS, "Runs": [EXAMPLE_TABS["Runs"][0], *rows]}
 
 
-class FakeResponse:
-    """The parts of a requests.Response that hpc_gantt reads."""
-
-    def __init__(self, status_code=200, headers=None, content=b""):
-        self.status_code, self.headers, self.content = status_code, headers or {}, content
+def png_size(path):
+    """Return a PNG file's (width, height), failing the test if the file isn't a PNG."""
+    data = path.read_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+    return struct.unpack(">II", data[16:24])
