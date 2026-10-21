@@ -1,0 +1,48 @@
+name: Update the HPC usage chart
+
+on:
+  schedule:
+    - cron: "17 17 * * 0"  # Sundays 17:17 UTC: Monday 06:17 NZDT, or 05:17 NZST
+  workflow_dispatch:  # the "Run workflow" button
+
+permissions: {}
+
+concurrency:
+  group: update-chart
+
+jobs:
+  chart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: dropbox  # holds the secrets; only main can use it
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa  # v10.3.1
+        with:
+          version: "0.11.28"  # the version that wrote hpc_gantt.py.lock
+          enable-cache: false
+      - name: Install rclone
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq rclone
+      - name: Draw the chart and upload it to Dropbox
+        run: uv run --script hpc_gantt.py
+        env:
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          RCLONE_CONFIG_DROPBOX_TYPE: dropbox
+          # Only the long-lived refresh token is stored. The past expiry makes rclone fetch a fresh access token.
+          RCLONE_CONFIG_DROPBOX_TOKEN: '{"refresh_token":"${{ secrets.DROPBOX_REFRESH_TOKEN }}","expiry":"2000-01-01T00:00:00Z"}'
+
+  # GitHub switches off a public repo's schedules after 60 days without a commit
+  keepalive:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Keep the weekly schedule switched on
+        run: gh api --method PUT "repos/$GITHUB_REPOSITORY/actions/workflows/update-chart.yml/enable"
+        env:
+          GH_TOKEN: ${{ github.token }}

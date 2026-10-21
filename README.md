@@ -6,7 +6,7 @@ Draws the team's **HPC usage plan** (a Google Sheet) as a Gantt chart and upload
 - **Span:** from two weeks back to about three months ahead.
 - **Problems:** any rows in the sheet it couldn't draw are listed under the chart.
 
-It runs every hour on mantle and uploads to `dropbox:/QuakeCoRE/hpc_usage_gantt.png`. A recurring Slack reminder, set up in Slack itself, posts the file's share link. The design is in [docs/superpowers/specs/2026-10-20-hpc-usage-gantt-design.md](docs/superpowers/specs/2026-10-20-hpc-usage-gantt-design.md).
+It runs once a week on GitHub Actions (see [How it runs](#how-it-runs)) and uploads to `dropbox:/QuakeCoRE/hpc_usage_gantt.png`. A recurring Slack reminder, set up in Slack itself, posts the file's share link. The design is in [docs/superpowers/specs/2026-10-20-hpc-usage-gantt-design.md](docs/superpowers/specs/2026-10-20-hpc-usage-gantt-design.md).
 
 ## The sheet
 
@@ -54,21 +54,25 @@ rclone link dropbox:/QuakeCoRE/hpc_usage_gantt.png
 
 Then, in the Slack channel, type `/remind #channel "HPC usage plan: <link>" every Monday at 9am`. Each upload replaces the file in place, so the link always shows the latest chart.
 
-## Deploy on mantle
+## How it runs
 
-1. **Pick the account that will run it.** It needs uv, rclone, and an `rclone.conf` with a working `dropbox` remote.
-   - On a new account, install uv and rclone, then copy in the `rclone.conf`. The file must be owned by that account with mode 600, and stay writable, because rclone refreshes the Dropbox token and saves it back.
-   - Optionally, give the bot its own token with `rclone authorize "dropbox"`, so it can be revoked without affecting anyone else.
-   - Check it works by running `rclone lsf dropbox:/QuakeCoRE --max-depth 1` as that account.
-2. **Copy the script and its lock file:** `sudo install -D -m 644 -t /opt/hpc-gantt/ hpc_gantt.py hpc_gantt.py.lock`
-3. **Install the units.** In `deploy/hpc-gantt.service`, fill in the three `CHANGE_ME` values: the account, the sheet ID, and the directory that holds that account's `uv`. Then run `sudo install -m 644 deploy/hpc-gantt.service deploy/hpc-gantt.timer /etc/systemd/system/`
-4. **Reload systemd:** `sudo systemctl daemon-reload`
-5. **Test it:** `sudo systemctl start hpc-gantt.service && journalctl -u hpc-gantt -n 20`. The log should end with `Uploaded to dropbox:/QuakeCoRE/hpc_usage_gantt.png`.
-6. **Go live:** `sudo systemctl enable --now hpc-gantt.timer`
+A GitHub Actions workflow, [`.github/workflows/update-chart.yml`](.github/workflows/update-chart.yml), runs the script once a week, early on Monday morning NZ time. It can also be run by hand.
+
+- **Secrets:** both live in the repo's `dropbox` environment, which only `main` can use.
+  - `SHEET_ID` is the ID from the sheet's URL. It's a secret so that the sheet's link stays private.
+  - `DROPBOX_REFRESH_TOKEN` is the refresh token of an rclone `dropbox` remote. It gives full access to the team Dropbox.
+- **Public log:** this repo is public, and so is the log of every run. That's why the script logs only how many problems it found in the sheet; the chart lists them.
+- **Keep-alive:** GitHub switches off a public repo's schedules after 60 days without a commit, so each scheduled run also switches the workflow back on.
 
 ## Operating
 
-- **Next run:** `systemctl list-timers hpc-gantt.timer`
-- **Log:** `journalctl -u hpc-gantt`
-- **Refresh the chart now:** `sudo systemctl start hpc-gantt.service`
-- **After changing the script's dependencies:** run `uv lock --script hpc_gantt.py` to re-lock, then copy both files to mantle again.
+- **Refresh the chart now:** on GitHub, go to Actions → "Update the HPC usage chart" → "Run workflow". Or run `gh workflow run update-chart.yml --repo ucgmsim/hpc_gantt_bot`. Either way needs write access to the repo.
+- **Runs and their logs:** the Actions tab, or `gh run list --workflow update-chart.yml --repo ucgmsim/hpc_gantt_bot`.
+- **When a run fails:** GitHub emails whoever last edited the `cron` line.
+- **Replace the Dropbox token** (for example, after it was revoked): run this on a machine with a working `dropbox` remote. The token is never shown:
+
+  ```bash
+  rclone config dump | jq -j '.dropbox.token | fromjson | .refresh_token' | gh secret set DROPBOX_REFRESH_TOKEN --env dropbox --repo ucgmsim/hpc_gantt_bot
+  ```
+- **Point it at another sheet:** `gh secret set SHEET_ID --env dropbox --repo ucgmsim/hpc_gantt_bot`. It prompts for the ID.
+- **After changing the script's dependencies:** run `uv lock --script hpc_gantt.py` to re-lock, and commit both files.
