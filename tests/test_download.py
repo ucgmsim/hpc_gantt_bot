@@ -10,8 +10,17 @@ XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 class FakeResponse:
     """The parts of a requests.Response that download_workbook reads."""
 
-    def __init__(self, status_code: int = 200, headers: dict[str, str] | None = None, content: bytes = b""):
-        self.status_code, self.headers, self.content = status_code, headers or {}, content
+    def __init__(
+        self,
+        status_code: int = 200,
+        headers: dict[str, str] | None = None,
+        content: bytes = b"",
+    ):
+        self.status_code, self.headers, self.content = (
+            status_code,
+            headers or {},
+            content,
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +50,10 @@ def test_download_returns_the_workbook(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_sign_in_page_points_at_sharing(monkeypatch: pytest.MonkeyPatch):
-    fake_get(monkeypatch, FakeResponse(200, {"Content-Type": "text/html; charset=utf-8"}, b"<html>"))
+    fake_get(
+        monkeypatch,
+        FakeResponse(200, {"Content-Type": "text/html; charset=utf-8"}, b"<html>"),
+    )
     with pytest.raises(SheetError, match="Anyone with the link can view"):
         download_workbook("abc")
 
@@ -54,7 +66,12 @@ def test_http_error_is_not_retried(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_server_errors_are_retried(monkeypatch: pytest.MonkeyPatch):
-    urls = fake_get(monkeypatch, FakeResponse(503), FakeResponse(503), FakeResponse(200, {"Content-Type": XLSX}, b"PK"))
+    urls = fake_get(
+        monkeypatch,
+        FakeResponse(503),
+        FakeResponse(503),
+        FakeResponse(200, {"Content-Type": XLSX}, b"PK"),
+    )
     assert download_workbook("abc") == b"PK" and len(urls) == 3
 
 

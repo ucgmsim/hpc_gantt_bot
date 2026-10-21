@@ -18,13 +18,51 @@ NOW = datetime(2026, 10, 20, 14, 0, tzinfo=NZ)
 EXAMPLE_TABS = {
     "Runs": [
         ["Person", "Description", "HPC", "Start date", "End date"],
-        ["Alex", "Hikurangi rupture scenarios", "Mahuika", datetime(2026, 10, 12), datetime(2026, 11, 1)],
-        ["Sam", "Kaikōura validation runs", "Frontera", datetime(2026, 10, 19), datetime(2026, 10, 23)],
-        ["Jordan", "Alpine Fault ensemble, part 2", "Mahuika", datetime(2026, 10, 26), datetime(2026, 11, 13)],
-        ["Riley", "Velocity model sensitivity tests", "Setonix", datetime(2026, 10, 28), datetime(2026, 11, 6)],
-        ["Casey", "Site response tests", "Frontera", "early Nov", datetime(2026, 11, 13)],
+        [
+            "Alex",
+            "Hikurangi rupture scenarios",
+            "Mahuika",
+            datetime(2026, 10, 12),
+            datetime(2026, 11, 1),
+        ],
+        [
+            "Sam",
+            "Kaikōura validation runs",
+            "Frontera",
+            datetime(2026, 10, 19),
+            datetime(2026, 10, 23),
+        ],
+        [
+            "Jordan",
+            "Alpine Fault ensemble, part 2",
+            "Mahuika",
+            datetime(2026, 10, 26),
+            datetime(2026, 11, 13),
+        ],
+        [
+            "Riley",
+            "Velocity model sensitivity tests",
+            "Setonix",
+            datetime(2026, 10, 28),
+            datetime(2026, 11, 6),
+        ],
+        [
+            "Casey",
+            "Site response tests",
+            "Frontera",
+            "early Nov",
+            datetime(2026, 11, 13),
+        ],
     ],
-    "People": [["Name"], ["Alex"], ["Sam"], ["Jordan"], ["Riley"], ["Casey"], ["Morgan"]],
+    "People": [
+        ["Name"],
+        ["Alex"],
+        ["Sam"],
+        ["Jordan"],
+        ["Riley"],
+        ["Casey"],
+        ["Morgan"],
+    ],
     "HPCs": [["HPC"], ["Mahuika"], ["Frontera"], ["Setonix"], ["Test cluster"]],
 }
 

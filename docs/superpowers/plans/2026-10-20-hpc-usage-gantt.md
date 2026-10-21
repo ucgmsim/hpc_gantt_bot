@@ -130,10 +130,19 @@ def parse_schedule(tabs: Mapping[str, Sequence[Sequence[object]]], first_day: da
 def test_parse_example(example_schedule):
     s = example_schedule
     assert [r.row for r in s.runs] == [2, 3, 4, 5]
-    assert s.runs[0] == Run(2, "Alex", "Hikurangi rupture scenarios", "Mahuika", date(2026, 10, 12), date(2026, 11, 1))
+    assert s.runs[0] == Run(
+        2,
+        "Alex",
+        "Hikurangi rupture scenarios",
+        "Mahuika",
+        date(2026, 10, 12),
+        date(2026, 11, 1),
+    )
     assert s.people == ["Alex", "Sam", "Jordan", "Riley", "Casey", "Morgan"]
     assert s.hpcs == ["Mahuika", "Frontera", "Setonix", "Test cluster"]
-    assert s.problems == ['Row 6 (Casey, Frontera): start date "early Nov" isn\'t a date']
+    assert s.problems == [
+        'Row 6 (Casey, Frontera): start date "early Nov" isn\'t a date'
+    ]
 
 
 def test_names_match_ignoring_case_and_spaces():
@@ -142,54 +151,97 @@ def test_names_match_ignoring_case_and_spaces():
 
 
 def test_extra_columns_and_tab_spelling_are_ignored():
-    tabs = {"runs": [["Person", "Description", "HPC", "Start date", "End date"]],
-            "people": [["Slack member ID", " NAME ", "Admin"], ["U04ABC1DEF", "Alex", True]],
-            "HPCs": [["Alert if idle", "HPC"], [True, "Mahuika"]]}
+    tabs = {
+        "runs": [["Person", "Description", "HPC", "Start date", "End date"]],
+        "people": [
+            ["Slack member ID", " NAME ", "Admin"],
+            ["U04ABC1DEF", "Alex", True],
+        ],
+        "HPCs": [["Alert if idle", "HPC"], [True, "Mahuika"]],
+    }
     s = parse_schedule(tabs, MON)
     assert (s.people, s.hpcs, s.problems) == (["Alex"], ["Mahuika"], [])
 
 
-@pytest.mark.parametrize("row, problem", [
-    (["Jamie", "x", "Mahuika", d1, d2], 'Row 2 (Jamie, Mahuika): "Jamie" isn\'t on the People tab'),
-    (["Alex", "x", "Kupe", d1, d2], 'Row 2 (Alex, Kupe): HPC "Kupe" isn\'t on the HPCs tab'),
-    ([None, "x", "Mahuika", d1, d2], "Row 2 (?, Mahuika): no person given"),
-    (["Alex", "x", "Mahuika", d2, d1], "Row 2 (Alex, Mahuika): start date is after the end date"),
-    (["Alex", "x", "Mahuika", d1, None], "Row 2 (Alex, Mahuika): end date is empty"),
-    (["Jamie", "x", "Kupe", d1, d2], 'Row 2 (Jamie, Kupe): "Jamie" isn\'t on the People tab; HPC "Kupe" isn\'t on the HPCs tab'),
-])
+@pytest.mark.parametrize(
+    "row, problem",
+    [
+        (
+            ["Jamie", "x", "Mahuika", d1, d2],
+            'Row 2 (Jamie, Mahuika): "Jamie" isn\'t on the People tab',
+        ),
+        (
+            ["Alex", "x", "Kupe", d1, d2],
+            'Row 2 (Alex, Kupe): HPC "Kupe" isn\'t on the HPCs tab',
+        ),
+        ([None, "x", "Mahuika", d1, d2], "Row 2 (?, Mahuika): no person given"),
+        (
+            ["Alex", "x", "Mahuika", d2, d1],
+            "Row 2 (Alex, Mahuika): start date is after the end date",
+        ),
+        (
+            ["Alex", "x", "Mahuika", d1, None],
+            "Row 2 (Alex, Mahuika): end date is empty",
+        ),
+        (
+            ["Jamie", "x", "Kupe", d1, d2],
+            'Row 2 (Jamie, Kupe): "Jamie" isn\'t on the People tab; HPC "Kupe" isn\'t on the HPCs tab',
+        ),
+    ],
+)
 def test_bad_rows_are_reported_and_skipped(row, problem):
     s = parse_schedule(with_runs(row), MON)
     assert (s.runs, s.problems) == ([], [problem])
 
 
 def test_rows_that_ended_before_the_first_day_are_not_checked():
-    s = parse_schedule(with_runs(["Jamie", "x", "Kupe", "early Oct", D(2026, 10, 18)]), MON)
+    s = parse_schedule(
+        with_runs(["Jamie", "x", "Kupe", "early Oct", D(2026, 10, 18)]), MON
+    )
     assert (s.runs, s.problems) == ([], [])
 
 
 def test_unreadable_end_date_is_always_reported():
-    s = parse_schedule(with_runs(["Alex", "x", "Mahuika", D(2026, 10, 1), "whenever"]), MON)
+    s = parse_schedule(
+        with_runs(["Alex", "x", "Mahuika", D(2026, 10, 1), "whenever"]), MON
+    )
     assert s.problems == ['Row 2 (Alex, Mahuika): end date "whenever" isn\'t a date']
 
 
 def test_reversed_dates_are_reported_even_when_the_end_is_past():
-    s = parse_schedule(with_runs(["Alex", "x", "Mahuika", D(2026, 12, 28), D(2026, 1, 8)]), date(2026, 12, 21))
-    assert (s.runs, s.problems) == ([], ["Row 2 (Alex, Mahuika): start date is after the end date"])
+    s = parse_schedule(
+        with_runs(["Alex", "x", "Mahuika", D(2026, 12, 28), D(2026, 1, 8)]),
+        date(2026, 12, 21),
+    )
+    assert (s.runs, s.problems) == (
+        [],
+        ["Row 2 (Alex, Mahuika): start date is after the end date"],
+    )
 
 
 def test_sheet_level_problems():
-    tabs = {"People": [["Name"], ["Alex"], ["alex"]], "HPCs": [["HPC"], ["Mahuika"], ["MAHUIKA"]],
-            "Runs": [["Person", "Description", "HPC", "Start date"]]}
+    tabs = {
+        "People": [["Name"], ["Alex"], ["alex"]],
+        "HPCs": [["HPC"], ["Mahuika"], ["MAHUIKA"]],
+        "Runs": [["Person", "Description", "HPC", "Start date"]],
+    }
     assert parse_schedule(tabs, MON).problems == [
         'The Runs tab has no "End date" column',
         'People row 3: "alex" is listed twice',
         'HPCs row 3: "MAHUIKA" is listed twice',
     ]
-    assert parse_schedule({"Runs": EXAMPLE_TABS["Runs"], "People": EXAMPLE_TABS["People"]}, MON).problems[0] == 'The sheet has no "HPCs" tab'
+    assert (
+        parse_schedule(
+            {"Runs": EXAMPLE_TABS["Runs"], "People": EXAMPLE_TABS["People"]}, MON
+        ).problems[0]
+        == 'The sheet has no "HPCs" tab'
+    )
 
 
 def test_real_google_export():
-    tabs = read_workbook((Path(__file__).parent / "fixtures" / "google_export.xlsx").read_bytes())
+    tabs = read_workbook(
+        (Path(__file__).parent / "fixtures" / "google_export.xlsx").read_bytes()
+    )
     s = parse_schedule(tabs, MON)
     assert (s.people, s.hpcs, s.runs) == ([], [], [])
     assert s.problems == ["Row 2 (?, ?): no person given; no HPC given"]
@@ -272,43 +324,130 @@ def test_chart_window():
 def test_lanes_follow_the_hpcs_tab(example_schedule):
     lanes = layout_chart(example_schedule, TUE).lanes
     assert [(l.hpc, l.top_row, l.rows, l.empty) for l in lanes] == [
-        ("Mahuika", 0, 2, False), ("Frontera", 2, 1, False), ("Setonix", 3, 1, False), ("Test cluster", 4, 1, True)]
+        ("Mahuika", 0, 2, False),
+        ("Frontera", 2, 1, False),
+        ("Setonix", 3, 1, False),
+        ("Test cluster", 4, 1, True),
+    ]
 
 
 def test_bars(example_schedule):
     layout = layout_chart(example_schedule, TUE)
     assert layout.rows == 5 and layout.problems == example_schedule.problems
-    assert [(b.row, b.start, b.end, b.cut_start, b.cut_end, b.finished, b.caption, b.label_x, b.label_align)
-            for b in layout.bars] == [
-        (0, date(2026, 10, 12), date(2026, 11, 2), False, False, False, "Alex · Hikurangi rupture scenarios", date(2026, 10, 12), "left"),
-        (1, date(2026, 10, 26), date(2026, 11, 14), False, False, False, "Jordan · Alpine Fault ensemble, part 2", date(2026, 10, 26), "left"),
-        (2, date(2026, 10, 19), date(2026, 10, 24), False, False, False, "Sam · Kaikōura validation runs", date(2026, 10, 19), "left"),
-        (3, date(2026, 10, 28), date(2026, 11, 7), False, False, False, "Riley · Velocity model sensitivity tests", date(2026, 10, 28), "left"),
+    assert [
+        (
+            b.row,
+            b.start,
+            b.end,
+            b.cut_start,
+            b.cut_end,
+            b.finished,
+            b.caption,
+            b.label_x,
+            b.label_align,
+        )
+        for b in layout.bars
+    ] == [
+        (
+            0,
+            date(2026, 10, 12),
+            date(2026, 11, 2),
+            False,
+            False,
+            False,
+            "Alex · Hikurangi rupture scenarios",
+            date(2026, 10, 12),
+            "left",
+        ),
+        (
+            1,
+            date(2026, 10, 26),
+            date(2026, 11, 14),
+            False,
+            False,
+            False,
+            "Jordan · Alpine Fault ensemble, part 2",
+            date(2026, 10, 26),
+            "left",
+        ),
+        (
+            2,
+            date(2026, 10, 19),
+            date(2026, 10, 24),
+            False,
+            False,
+            False,
+            "Sam · Kaikōura validation runs",
+            date(2026, 10, 19),
+            "left",
+        ),
+        (
+            3,
+            date(2026, 10, 28),
+            date(2026, 11, 7),
+            False,
+            False,
+            False,
+            "Riley · Velocity model sensitivity tests",
+            date(2026, 10, 28),
+            "left",
+        ),
     ]
 
 
 def test_finished_runs(example_schedule):
     bars = layout_chart(example_schedule, date(2026, 10, 26)).bars
     assert [(b.caption.split(" ·")[0], b.finished) for b in bars] == [
-        ("Alex", False), ("Jordan", False), ("Sam", True), ("Riley", False)]
+        ("Alex", False),
+        ("Jordan", False),
+        ("Sam", True),
+        ("Riley", False),
+    ]
 
 
 def test_run_longer_than_the_chart_is_cut_at_both_ends():
-    s = Schedule(["Alex"], ["Mahuika"], [Run(2, "Alex", "Long campaign", "Mahuika", date(2026, 9, 1), date(2027, 3, 1))], [])
+    s = Schedule(
+        ["Alex"],
+        ["Mahuika"],
+        [
+            Run(
+                2,
+                "Alex",
+                "Long campaign",
+                "Mahuika",
+                date(2026, 9, 1),
+                date(2027, 3, 1),
+            )
+        ],
+        [],
+    )
     (bar,) = layout_chart(s, TUE).bars
-    assert (bar.start, bar.end, bar.cut_start, bar.cut_end, bar.label_x, bar.label_align) == (
-        date(2026, 10, 5), date(2027, 1, 18), True, True, date(2026, 10, 5), "left")
+    assert (
+        bar.start,
+        bar.end,
+        bar.cut_start,
+        bar.cut_end,
+        bar.label_x,
+        bar.label_align,
+    ) == (date(2026, 10, 5), date(2027, 1, 18), True, True, date(2026, 10, 5), "left")
 
 
 def test_runs_outside_the_chart_leave_the_lane_empty():
-    runs = [Run(2, "Alex", "", "Mahuika", date(2026, 9, 1), date(2026, 10, 4)),
-            Run(3, "Alex", "", "Mahuika", date(2027, 1, 18), date(2027, 1, 20))]
+    runs = [
+        Run(2, "Alex", "", "Mahuika", date(2026, 9, 1), date(2026, 10, 4)),
+        Run(3, "Alex", "", "Mahuika", date(2027, 1, 18), date(2027, 1, 20)),
+    ]
     layout = layout_chart(Schedule(["Alex"], ["Mahuika"], runs, []), TUE)
     assert layout.bars == [] and layout.lanes[0].empty and layout.rows == 1
 
 
 def test_late_starting_run_gets_a_right_aligned_caption():
-    s = Schedule(["Alex"], ["Mahuika"], [Run(2, "Alex", "", "Mahuika", date(2026, 12, 20), date(2026, 12, 24))], [])
+    s = Schedule(
+        ["Alex"],
+        ["Mahuika"],
+        [Run(2, "Alex", "", "Mahuika", date(2026, 12, 20), date(2026, 12, 24))],
+        [],
+    )
     (bar,) = layout_chart(s, TUE).bars
     assert (bar.label_x, bar.label_align) == (date(2026, 12, 25), "right")
 
@@ -380,7 +519,15 @@ import struct
 import warnings
 from datetime import date, datetime
 
-from hpc_gantt import NZ, Run, Schedule, chart_subtitle, draw_chart, footer_lines, layout_chart
+from hpc_gantt import (
+    NZ,
+    Run,
+    Schedule,
+    chart_subtitle,
+    draw_chart,
+    footer_lines,
+    layout_chart,
+)
 
 UPDATED = datetime(2026, 10, 20, 14, 0, tzinfo=NZ)
 TUE = date(2026, 10, 20)
@@ -394,13 +541,18 @@ def png_size(path):
 
 def test_chart_subtitle():
     assert chart_subtitle(date(2026, 10, 5), date(2027, 1, 18), UPDATED) == (
-        "Updated Tue 20 Oct 2026, 14:00 NZDT · showing 5 Oct 2026 – 17 Jan 2027")
+        "Updated Tue 20 Oct 2026, 14:00 NZDT · showing 5 Oct 2026 – 17 Jan 2027"
+    )
 
 
 def test_footer_lines():
     assert footer_lines([]) == []
     assert footer_lines(["a"]) == ["Problems in the sheet:", "a"]
-    assert footer_lines([f"p{i}" for i in range(10)]) == ["Problems in the sheet:", *[f"p{i}" for i in range(8)], "…and 2 more"]
+    assert footer_lines([f"p{i}" for i in range(10)]) == [
+        "Problems in the sheet:",
+        *[f"p{i}" for i in range(8)],
+        "…and 2 more",
+    ]
 
 
 def test_draws_a_png(example_schedule, tmp_path):
@@ -409,21 +561,42 @@ def test_draws_a_png(example_schedule, tmp_path):
 
 
 def test_height_grows_with_rows(example_schedule, tmp_path):
-    many = [Run(i, "Alex", f"run {i}", "Mahuika", date(2026, 10, 20), date(2026, 10, 30)) for i in range(2, 32)]
+    many = [
+        Run(i, "Alex", f"run {i}", "Mahuika", date(2026, 10, 20), date(2026, 10, 30))
+        for i in range(2, 32)
+    ]
     draw_chart(layout_chart(example_schedule, TUE), UPDATED, tmp_path / "few.png")
-    draw_chart(layout_chart(Schedule(["Alex"], ["Mahuika"], many, []), TUE), UPDATED, tmp_path / "many.png")
+    draw_chart(
+        layout_chart(Schedule(["Alex"], ["Mahuika"], many, []), TUE),
+        UPDATED,
+        tmp_path / "many.png",
+    )
     assert png_size(tmp_path / "many.png")[1] > png_size(tmp_path / "few.png")[1]
 
 
 def test_empty_sheet_still_draws(tmp_path):
-    draw_chart(layout_chart(Schedule([], [], [], []), TUE), UPDATED, tmp_path / "empty.png")
+    draw_chart(
+        layout_chart(Schedule([], [], [], []), TUE), UPDATED, tmp_path / "empty.png"
+    )
     assert png_size(tmp_path / "empty.png")[0] == 1680
 
 
 def test_unicode_and_long_text_draw_without_warnings(tmp_path):
-    s = Schedule(["Ōtautahi Ngā"], ["Mahuika"],
-                 [Run(2, "Ōtautahi Ngā", "Kaikōura " * 30, "Mahuika", date(2026, 9, 1), date(2027, 3, 1))],
-                 [f'Row {i} (?, ?): no person given' for i in range(12)])
+    s = Schedule(
+        ["Ōtautahi Ngā"],
+        ["Mahuika"],
+        [
+            Run(
+                2,
+                "Ōtautahi Ngā",
+                "Kaikōura " * 30,
+                "Mahuika",
+                date(2026, 9, 1),
+                date(2027, 3, 1),
+            )
+        ],
+        [f"Row {i} (?, ?): no person given" for i in range(12)],
+    )
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         draw_chart(layout_chart(s, TUE), UPDATED, tmp_path / "text.png")
@@ -485,7 +658,12 @@ def test_upload_runs_rclone_copyto():
         return subprocess.CompletedProcess(args, 0, "", "")
 
     upload(Path("/tmp/chart.png"), DEST, run=run)
-    assert calls == [(["rclone", "copyto", "/tmp/chart.png", DEST], {"capture_output": True, "text": True, "timeout": 300})]
+    assert calls == [
+        (
+            ["rclone", "copyto", "/tmp/chart.png", DEST],
+            {"capture_output": True, "text": True, "timeout": 300},
+        )
+    ]
 
 
 def test_missing_rclone_is_explained():
@@ -498,9 +676,13 @@ def test_missing_rclone_is_explained():
 
 def test_rclone_failure_shows_its_last_error_line():
     def run(args, **kwargs):
-        return subprocess.CompletedProcess(args, 1, "", "2026/10/20 NOTICE: x\n2026/10/20 ERROR : token expired\n\n")
+        return subprocess.CompletedProcess(
+            args, 1, "", "2026/10/20 NOTICE: x\n2026/10/20 ERROR : token expired\n\n"
+        )
 
-    with pytest.raises(UploadError, match="rclone failed: 2026/10/20 ERROR : token expired$"):
+    with pytest.raises(
+        UploadError, match="rclone failed: 2026/10/20 ERROR : token expired$"
+    ):
         upload(Path("/tmp/chart.png"), DEST, run=run)
 
 
@@ -584,7 +766,9 @@ NOW = datetime(2026, 10, 20, 14, 0, tzinfo=NZ)
 @pytest.fixture
 def world(monkeypatch):
     uploads = []
-    monkeypatch.setattr(hpc_gantt, "download_workbook", lambda sheet_id: make_xlsx(EXAMPLE_TABS))
+    monkeypatch.setattr(
+        hpc_gantt, "download_workbook", lambda sheet_id: make_xlsx(EXAMPLE_TABS)
+    )
 
     def fake_upload(local, destination):
         uploads.append((destination, local.read_bytes()[:4] == b"\x89PNG"))
@@ -623,15 +807,32 @@ def test_upload_failure_exits_1(world, monkeypatch, capsys):
 
 def test_sheet_problems_go_to_stderr(world, tmp_path, capsys):
     update_chart("ID", NOW.date(), NOW, None, tmp_path / "c.png")
-    assert 'Sheet problem: Row 6 (Casey, Frontera): start date "early Nov" isn\'t a date' in capsys.readouterr().err
+    assert (
+        'Sheet problem: Row 6 (Casey, Frontera): start date "early Nov" isn\'t a date'
+        in capsys.readouterr().err
+    )
 
 
 def test_cli_flags(monkeypatch, tmp_path):
     seen = []
-    monkeypatch.setattr(hpc_gantt, "update_chart", lambda sheet_id, today, now, upload_to, output: seen.append((sheet_id, today, upload_to, output)) or 0)
+    monkeypatch.setattr(
+        hpc_gantt,
+        "update_chart",
+        lambda sheet_id, today, now, upload_to, output: (
+            seen.append((sheet_id, today, upload_to, output)) or 0
+        ),
+    )
     monkeypatch.setenv("SHEET_ID", "abc")
     with pytest.raises(SystemExit) as no_upload:
-        hpc_gantt.app(["--no-upload", "--output", str(tmp_path / "c.png"), "--pretend-today-is", "2026-10-20"])
+        hpc_gantt.app(
+            [
+                "--no-upload",
+                "--output",
+                str(tmp_path / "c.png"),
+                "--pretend-today-is",
+                "2026-10-20",
+            ]
+        )
     with pytest.raises(SystemExit) as default:
         hpc_gantt.app([])
     assert (no_upload.value.code, default.value.code) == (0, 0)
@@ -796,18 +997,27 @@ On GitHub, the log of every run is public, and today each problem is logged with
 - [ ] **Step 1: Replace the test.** In `tests/test_cli.py`, replace `test_sheet_problems_go_to_stderr` with the test below, and import `with_runs` from `helpers`:
 
 ```python
-@pytest.mark.parametrize("problem_rows, logged", [
-    (0, ""),
-    (1, "The sheet has 1 problem, listed at the bottom of the chart.\n"),
-    (2, "The sheet has 2 problems, listed at the bottom of the chart.\n"),
-])
-def test_only_the_number_of_sheet_problems_is_logged(uploads, monkeypatch, tmp_path, capsys, problem_rows, logged):
+@pytest.mark.parametrize(
+    "problem_rows, logged",
+    [
+        (0, ""),
+        (1, "The sheet has 1 problem, listed at the bottom of the chart.\n"),
+        (2, "The sheet has 2 problems, listed at the bottom of the chart.\n"),
+    ],
+)
+def test_only_the_number_of_sheet_problems_is_logged(
+    uploads, monkeypatch, tmp_path, capsys, problem_rows, logged
+):
     # Run logs are public on GitHub, so names and sheet text stay out of them
     good = ["Alex", "x", "Mahuika", date(2026, 10, 19), date(2026, 10, 23)]
-    bad = [["Jamie", "x", "Mahuika", date(2026, 10, 19), date(2026, 10, 23)],
-           ["Casey", "x", "Frontera", "early Nov", date(2026, 11, 13)]]
+    bad = [
+        ["Jamie", "x", "Mahuika", date(2026, 10, 19), date(2026, 10, 23)],
+        ["Casey", "x", "Frontera", "early Nov", date(2026, 11, 13)],
+    ]
     tabs = with_runs(good, *bad[:problem_rows])
-    monkeypatch.setattr(hpc_gantt, "download_workbook", lambda sheet_id: make_xlsx(tabs))
+    monkeypatch.setattr(
+        hpc_gantt, "download_workbook", lambda sheet_id: make_xlsx(tabs)
+    )
     assert update_chart("ID", NOW.date(), NOW, None, tmp_path / "c.png") == 0
     assert capsys.readouterr().err == logged
 ```
@@ -816,9 +1026,12 @@ def test_only_the_number_of_sheet_problems_is_logged(uploads, monkeypatch, tmp_p
 - [ ] **Step 3: Implement.** In `update_chart`, replace the loop that prints each problem with:
 
 ```python
-    if schedule.problems:
-        count = len(schedule.problems)
-        print(f"The sheet has {count} problem{'' if count == 1 else 's'}, listed at the bottom of the chart.", file=sys.stderr)
+if schedule.problems:
+    count = len(schedule.problems)
+    print(
+        f"The sheet has {count} problem{'' if count == 1 else 's'}, listed at the bottom of the chart.",
+        file=sys.stderr,
+    )
 ```
 
 - [ ] **Step 4: Run the tests.** `TEST`. Expected: all pass.
