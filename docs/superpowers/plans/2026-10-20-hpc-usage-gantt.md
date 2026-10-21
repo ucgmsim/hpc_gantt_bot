@@ -881,3 +881,47 @@ Steps 5–7 publish and write to the team's Dropbox. They're done with that appr
     - the downloaded chart looks right.
 - [ ] **Step 8: The real share link.** This was Task 7 Step 5, and needs the user's go-ahead. Run `rclone link dropbox:/QuakeCoRE/hpc_usage_gantt.png` and give the link to the user for their Slack `/remind`.
 - [ ] **Step 9: The first scheduled run.** After the next Monday morning, `gh run list --workflow update-chart.yml --event schedule` should show a success.
+
+---
+
+### Task 11: Adopt the team's shared CI (before Task 10 Step 4)
+
+On 2026-10-22 the user decided to adopt `ucgmsim/meta-ci-action` v2 before the repo goes public. A trial on a scratch copy, with qcore's settings, found:
+- pytest: 57 of 57 pass;
+- deptry: clean;
+- `ruff format`: would change 11 of 15 files;
+- `ruff check`: 70 findings (58 missing argument type hints in tests, 7 import-order, 3 missing docstrings, 2 `datetime as D` aliases);
+- ty: 8 errors;
+- npdlint: 47 docstring findings.
+
+**Files:**
+- Create `pyproject.toml`, `uv.lock` and `.github/workflows/ci.yml`.
+- Modify `hpc_gantt.py`, `tests/*.py`, `.github/workflows/update-chart.yml` and `README.md`.
+- Delete `hpc_gantt.py.lock`.
+
+- [ ] **Step 1: Reference renders.** Render three charts with the current code and its locked versions (`uv export --script hpc_gantt.py`):
+  - the example chart;
+  - an empty sheet;
+  - a stress chart: a run past both edges, a finished run, a late right-aligned caption, `$` signs, macrons, and more than 8 problems.
+- [ ] **Step 2: Make the repo a project.**
+  - Write `pyproject.toml`:
+    - the four dependencies;
+    - a `dev` group with deptry, pytest, ruff and ty;
+    - `[tool.uv] package = false`;
+    - qcore's ruff, `numpydoc_validation` and `npdlint` settings.
+  - Remove the script's PEP 723 header and shebang.
+  - Run `uv lock` and delete `hpc_gantt.py.lock`. Compare the locked versions with the old lock.
+  - The weekly workflow runs `uv run --locked --no-dev hpc_gantt.py`. Update the README's commands to match.
+  - `TEST` becomes `uv run pytest -q`. Expected: 57 pass. Commit.
+- [ ] **Step 3: Fix the findings.**
+  - **ty:** narrow away None before building a `Run`, give `OVER_PLOT_TEXT` the type `dict[str, Any]`, and use matplotlib's string form for the bar's box style.
+  - **ruff:** add the missing docstrings, type the test arguments, rename the `datetime as D` aliases, and run `ruff check --fix` for import order.
+  - **npdlint:** add numpydoc Parameters and Returns sections.
+
+  Expected: `ruff check`, `ty check` and `npdlint check` report nothing, and `TEST` passes. Commit.
+- [ ] **Step 4: Run `ruff format`,** in a commit of its own. Expected: `ruff format --check` is clean, and `TEST` passes.
+- [ ] **Step 5: Add `.github/workflows/ci.yml`.** It calls `ucgmsim/meta-ci-action/.github/workflows/ci.yml@v2` on pull requests and on pushes to `main`, with `python-version: "3.14"`. actionlint must be clean. Commit.
+- [ ] **Step 6: Check everything locally, as the shared CI would.**
+  - Run `uv sync --all-extras --dev`, then each of: `uv run --no-sync ruff check`, `ruff format --check`, `deptry .`, `pytest tests` and `ty check`, plus `uvx npdlint check`. Expected: all clean.
+  - Re-render the reference charts. Expected: byte-identical to Step 1, in the same library versions.
+- [ ] **Step 7: Merge into main** with `--ff-only`. Then Task 10 resumes at Step 4.

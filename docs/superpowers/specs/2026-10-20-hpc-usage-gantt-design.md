@@ -102,7 +102,7 @@ The chart follows the dataviz skill's rules, and the layout descends from `gantt
 
 *(Claude's call)*
 
-- **Script:** rename `hpc_reminder.py` to `hpc_gantt.py`. It's one uv script with its dependencies listed inline (`openpyxl`, `requests`, `matplotlib`, `cyclopts`), on Python 3.14, like `gantt.py`.
+- **Script:** rename `hpc_reminder.py` to `hpc_gantt.py`. It's one uv script with its dependencies listed inline (`openpyxl`, `requests`, `matplotlib`, `cyclopts`), on Python 3.14, like `gantt.py`. *Changed 2026-10-22:* the repo is now a small uv project instead. `pyproject.toml` lists the dependencies and `uv.lock` pins them, so the team's shared CI can check it (see "Shared CI").
 - **Command:** a single command, `hpc_gantt.py [--no-upload] [--output PATH] [--upload-to REMOTE:PATH] [--pretend-today-is YYYY-MM-DD]`. `SHEET_ID` is still read from the environment.
   - `--no-upload` draws the chart into `--output` (default `./hpc_usage_gantt.png`) and stops there.
   - Without it, the script draws the chart and uploads it to `--upload-to` (default `dropbox:/QuakeCoRE/hpc_usage_gantt.png`).
@@ -140,6 +140,17 @@ This replaces the earlier plan of an hourly systemd timer on mantle. On GitHub t
 - **Pinned versions:** uv is pinned to 0.11.28, the version that wrote `hpc_gantt.py.lock`. Actions are pinned to commit SHAs.
 - **Keep-alive:** GitHub turns off schedules in a public repo after 60 days without a commit. On scheduled runs, a second job re-enables the workflow through GitHub's API. Only that job gets `actions: write`.
 - **Not on GitHub:** the chart itself. It isn't saved as a run artifact; it only goes to Dropbox.
+
+## Shared CI *(decided 2026-10-22)*
+
+The repo uses the team's shared checks, `ucgmsim/meta-ci-action` v2, as qcore does. They run on every pull request and on pushes to `main`: ruff (lint and format), deptry, npdlint (numpydoc docstrings), pytest, and ty (types). This is done before the repo goes public *(decided)*.
+
+- **Project:** the shared jobs run `uv sync`, so the script becomes a small uv project.
+  - `pyproject.toml` holds the four dependencies, which leave the script's header, and a `dev` group with pytest, ruff, deptry and ty.
+  - `uv.lock` replaces `hpc_gantt.py.lock`, so the tests and the bot use the same locked versions.
+  - It isn't an installable package (`[tool.uv] package = false`).
+- **Settings:** the ruff and docstring settings are copied from qcore *(Claude's call)*.
+- **Behaviour:** unchanged. The tests stay green, and reference charts render byte-identical before and after.
 
 ## Left to the builder
 
