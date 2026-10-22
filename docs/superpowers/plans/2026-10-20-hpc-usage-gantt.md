@@ -13,7 +13,7 @@
 
 **Tech Stack:** Python 3.14, uv (a PEP 723 script until Task 11, then a uv project), openpyxl, requests, matplotlib (Agg), cyclopts 5, rclone, pytest, GitHub Actions.
 
-**Spec:** `docs/superpowers/specs/2026-10-20-hpc-usage-gantt-design.md`. Read it first. It replaces the 2026-10-19 Slack spec.
+**Spec:** `docs/superpowers/specs/2026-10-20-hpc-usage-gantt-design.md`. Read it first. It replaces the 2026-10-19 Slack-bot spec, which isn't kept in the repo.
 
 ## Global Constraints
 
@@ -1076,8 +1076,13 @@ Steps 5–7 publish and write to the team's Dropbox. They're done with that appr
 - [ ] **Step 3: Merge into main.** `git checkout main && git merge --ff-only feat/hpc-gantt`, then `TEST` on main.
 - [ ] **Step 4: Remove the private details from all history.**
   - Back up first: `git bundle create <scratchpad>/before-scrub.bundle --all`.
-  - Then run `git filter-repo --force --replace-text <file>`. The file replaces the sheet ID with `<sheet ID>` and removes the team Google account's address.
-  - Expected: neither appears in any blob of `git rev-list --all` or in any commit message, and `TEST` passes.
+  - Then run `git filter-repo --force` with:
+    - `--replace-text`: the sheet ID becomes `<sheet ID>`, the team Google account's address goes, and the user's username becomes `<you>`;
+    - `--replace-message`: the Claude-Session lines go;
+    - `--invert-paths` on the two superseded 2026-10-19 Slack-bot docs.
+
+    The last three are the user's choices of 2026-10-22.
+  - Expected: none of them appears in any blob or commit message of `git rev-list --all`, the two docs are in no commit, and `TEST` passes.
 - [ ] **Step 5: Publish.**
   - `gh repo create ucgmsim/hpc_gantt_bot --public`, add it as `origin`, then `git push -u origin main`.
   - Expected: the push starts one CI run, because `ci.yml` runs on pushes to `main`. It needs no secrets and should pass. The chart workflow doesn't start, because it has no push trigger.

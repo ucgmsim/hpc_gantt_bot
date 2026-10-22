@@ -62,19 +62,37 @@ A GitHub Actions workflow, [`.github/workflows/update-chart.yml`](.github/workfl
 
 - **Secrets:** both live in the repo's `dropbox` environment, which only `main` can use.
   - `SHEET_ID` is the ID from the sheet's URL. It's a secret so that the sheet's link stays private.
-  - `DROPBOX_REFRESH_TOKEN` is the refresh token of an rclone `dropbox` remote. It gives full access to the team Dropbox.
-- **Public log:** this repo is public, and so is the log of every run. That's why the script logs only how many problems it found in the sheet; the chart lists them.
+  - `DROPBOX_REFRESH_TOKEN` is the refresh token of an rclone `dropbox` remote. It gives full access to everything in that Dropbox account.
+- **Public log:** this repo is public, and so is the log of every run. That's why the script logs only how many problems it found in the sheet (the chart lists them) and only the type of a download error, and drops matplotlib's warnings about characters the font lacks.
 - **Keep-alive:** GitHub switches off a public repo's schedules after 60 days without a commit, so each scheduled run also switches the workflow back on.
+
+## Setting it up on GitHub
+
+This was done once, when the repo was created. Repeat it to rebuild the setup; it needs admin rights on the repo.
+
+```bash
+REPO=ucgmsim/hpc_gantt_bot
+# Workflows get a read-only token unless they ask for more
+gh api -X PUT repos/$REPO/actions/permissions/workflow -f default_workflow_permissions=read
+# The "dropbox" environment, which only main can use
+gh api -X PUT repos/$REPO/environments/dropbox --input - <<< '{"deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}'
+gh api -X POST repos/$REPO/environments/dropbox/deployment-branch-policies -f name=main -f type=branch
+# The sheet's ID; it prompts for it
+gh secret set SHEET_ID --env dropbox --repo $REPO
+```
+
+Then set `DROPBOX_REFRESH_TOKEN` as described under "Replace the Dropbox token" below.
 
 ## Operating
 
 - **Refresh the chart now:** on GitHub, go to Actions → "Update the HPC usage chart" → "Run workflow". Or run `gh workflow run update-chart.yml --repo ucgmsim/hpc_gantt_bot`. Either way needs write access to the repo.
 - **Runs and their logs:** the Actions tab, or `gh run list --workflow update-chart.yml --repo ucgmsim/hpc_gantt_bot`.
 - **When a run fails:** GitHub emails whoever last edited the `cron` line.
-- **Replace the Dropbox token** (for example, after it was revoked): run this on a machine with a working `dropbox` remote. The token is never shown:
+- **Replace the Dropbox token** (for example, after it was revoked): on a machine with an rclone `dropbox` remote, run `rclone config reconnect dropbox:` first if that remote's token was revoked too; it opens a browser to sign in again. Then run this, which never shows the token and stops if the remote has no refresh token:
 
   ```bash
-  rclone config dump | jq -j '.dropbox.token | fromjson | .refresh_token' | gh secret set DROPBOX_REFRESH_TOKEN --env dropbox --repo ucgmsim/hpc_gantt_bot
+  token=$(rclone config dump | jq -j '.dropbox.token | fromjson | .refresh_token // error("the dropbox remote has no refresh token")') &&
+    printf %s "$token" | gh secret set DROPBOX_REFRESH_TOKEN --env dropbox --repo ucgmsim/hpc_gantt_bot; unset token
   ```
 - **Point it at another sheet:** `gh secret set SHEET_ID --env dropbox --repo ucgmsim/hpc_gantt_bot`. It prompts for the ID.
 - **Changing dependencies:** `uv add <package>` or `uv remove <package>`, then commit `pyproject.toml` and `uv.lock`.

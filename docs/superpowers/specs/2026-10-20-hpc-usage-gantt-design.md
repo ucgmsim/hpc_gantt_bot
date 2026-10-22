@@ -1,6 +1,6 @@
 # HPC usage Gantt chart: design
 
-2026-10-20 · Approved by the user. This replaces the Slack-bot design of 2026-10-19 (`2026-10-19-hpc-usage-reminder-bot-design.md`).
+2026-10-20 · Approved by the user. This replaces the Slack-bot design of 2026-10-19, which isn't kept in the repo.
 
 **Updated 2026-10-22** *(decided)*: the bot now runs once a week on GitHub Actions, in the public repo `ucgmsim/hpc_gantt_bot`, instead of hourly on mantle. See "On GitHub Actions".
 
@@ -108,7 +108,7 @@ The chart follows the dataviz skill's rules, and the layout descends from `gantt
   - Without it, the script draws the chart and uploads it to `--upload-to` (default `dropbox:/QuakeCoRE/hpc_usage_gantt.png`).
 - **Code that goes:** everything specific to Slack. That's the message text, posting, retry-on-post, state file, idle alerts, weekly and heads-up commands, their tests, and the current systemd units.
 - **Code that stays:** the date helpers, the sheet download with retries, and the sheet parsing (simplified as above), with their tests.
-- **Log output** *(decided 2026-10-22)*: the run log of a public repo is public. So the script logs only how many problems it found in the sheet, never the names or text. The problems themselves are listed on the chart.
+- **Log output** *(decided 2026-10-22)*: the run log of a public repo is public. So the script logs only how many problems it found in the sheet, never the names or text. The problems themselves are listed on the chart. For the same reason, it drops matplotlib's warnings about characters the font lacks, which name the character, and it reports only the type of a download error, because requests' messages carry the URL *(final review 2)*.
 
 ## Laptop trial
 
@@ -133,7 +133,7 @@ This replaces the earlier plan of an hourly systemd timer on mantle. On GitHub t
   - The refresh token is stored on its own, as a plain string, because GitHub only reliably masks a secret that's printed whole. The workflow wraps it in rclone's token JSON with an expiry date in the past, so rclone fetches a fresh access token at once. Tested on the laptop on 2026-10-22 *(Claude's call)*.
   - The secrets live in a GitHub environment called `dropbox` that only `main` can use.
   - Nobody can read a secret back, GitHub masks secret values in logs, and workflows started from forks get no secrets.
-  - The sheet's link must never be public. Before the first push, `git filter-repo` removes the sheet ID and the team Google account's address from every commit.
+  - The sheet's link must never be public. Before the first push, `git filter-repo` removes from every commit the sheet ID and the team Google account's address. At the user's choice, it also removes their university username (replaced by `<you>`), the Claude-Session links in commit messages, and the superseded 2026-10-19 Slack-bot spec and plan *(decided 2026-10-22)*.
 - **rclone:** installed on the runner from Ubuntu's packages.
   - The remote comes from `RCLONE_CONFIG_DROPBOX_TYPE=dropbox` and `RCLONE_CONFIG_DROPBOX_TOKEN`.
   - rclone refreshes the short-lived access token on each run, and the refreshed copy is thrown away with the runner. This was tested on the laptop on 2026-10-22.
@@ -164,6 +164,6 @@ The repo uses the team's shared checks, `ucgmsim/meta-ci-action` v2, as qcore do
 
 ## Open items
 
-- Branch protection on `main`, i.e. requiring a reviewed pull request. It would stop anyone with write access from changing the workflow to read the secrets. The user decides.
+- Branch protection on `main` *(decided 2026-10-22)*: push straight to `main` until the bot is finalized, then allow changes only through pull requests.
 - The channel and wording of the Slack reminder. The user sets this up.
 - Whether the share link survives a re-upload. The laptop trial checks this.
