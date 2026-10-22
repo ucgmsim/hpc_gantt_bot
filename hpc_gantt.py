@@ -153,12 +153,13 @@ def download_workbook(sheet_id: str) -> bytes:
     for attempt in range(3):
         if attempt:
             time.sleep(5)
+        # Only the error's type is reported: requests' messages carry the URL, and run logs are public.
         try:
             response = requests.get(url, timeout=30)
         except (requests.ConnectionError, requests.Timeout) as exc:
-            failure = f"download failed: {exc}"
+            failure = f"download failed: {type(exc).__name__}"
         except requests.RequestException as exc:
-            raise SheetError(f"download failed: {exc}") from exc
+            raise SheetError(f"download failed: {type(exc).__name__}") from exc
         else:
             if response.status_code != 429 and response.status_code < 500:
                 break

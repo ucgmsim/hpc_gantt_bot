@@ -80,3 +80,26 @@ def test_network_failure_gives_up_after_three_tries(monkeypatch: pytest.MonkeyPa
     with pytest.raises(SheetError, match="download failed"):
         download_workbook("abc")
     assert len(urls) == 3
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        requests.ConnectionError(
+            "Max retries exceeded with url: /export/a/b/1/123456789012345678901/*/SECRET_ID"
+        ),
+        requests.TooManyRedirects(
+            "Exceeded 30 redirects: https://docs.google.com/spreadsheets/d/SECRET_ID/export"
+        ),
+    ],
+    ids=["connection", "redirects"],
+)
+def test_download_errors_name_only_the_error_type(
+    monkeypatch: pytest.MonkeyPatch, error: requests.RequestException
+):
+    # Run logs are public, and requests' messages carry the URL: the sheet ID, and on Google's redirect the owner's
+    # account ID
+    fake_get(monkeypatch, *[error] * 3)
+    with pytest.raises(SheetError) as raised:
+        download_workbook("SECRET_ID")
+    assert str(raised.value) == f"download failed: {type(error).__name__}"
