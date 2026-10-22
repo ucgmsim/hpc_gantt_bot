@@ -5,13 +5,13 @@
 **Goal:** Replace the Slack bot with `hpc_gantt.py`, which downloads the "HPC usage plan" sheet, draws a Gantt chart PNG, and uploads it with rclone to `dropbox:/QuakeCoRE/hpc_usage_gantt.png`. Prove it on the laptop first, then run it weekly on GitHub Actions. *(Changed 2026-10-22: Tasks 9–10 replace Task 8's mantle deployment.)*
 
 **Architecture:**
-- **One file:** a single uv script.
+- **One file:** a single script, `hpc_gantt.py`. Since Task 11 it sits in a small uv project.
 - **Reused:** the existing sheet download and checks.
 - **New pure function:** `layout_chart` turns the checked sheet into lanes, rows, bars and captions. It's unit-tested.
 - **New thin edges:** `draw_chart` draws that layout with matplotlib, and `upload` shells out to `rclone copyto`.
 - **On GitHub Actions:** a scheduled workflow runs the script once a week, and on demand.
 
-**Tech Stack:** Python 3.14, uv (PEP 723 script), openpyxl, requests, matplotlib (Agg), cyclopts 5, rclone, pytest, GitHub Actions.
+**Tech Stack:** Python 3.14, uv (a PEP 723 script until Task 11, then a uv project), openpyxl, requests, matplotlib (Agg), cyclopts 5, rclone, pytest, GitHub Actions.
 
 **Spec:** `docs/superpowers/specs/2026-10-20-hpc-usage-gantt-design.md`. Read it first. It replaces the 2026-10-19 Slack spec.
 
@@ -20,9 +20,9 @@
 - **The script:**
   - Requires Python `>=3.14`.
   - All code lives in `hpc_gantt.py`, renamed from `hpc_reminder.py` with `git mv`.
-  - It's a uv script whose PEP 723 header lists exactly `cyclopts`, `matplotlib`, `openpyxl` and `requests`. matplotlib is added in Task 3.
+  - It's a uv script whose PEP 723 header lists exactly `cyclopts`, `matplotlib`, `openpyxl` and `requests`. matplotlib is added in Task 3. *(Since Task 11, `pyproject.toml` lists them instead.)*
   - Follow the style of `gantt.py`: a cyclopts `App` and numpy-style docstrings.
-- **Test command (`TEST`):** `uv run --no-project --python 3.14 --with pytest --with-requirements hpc_gantt.py python -m pytest -q`. Single tests take the same command plus `tests/<file>::<test> -v`.
+- **Test command (`TEST`):** `uv run --no-project --python 3.14 --with pytest --with-requirements hpc_gantt.py python -m pytest -q`. Single tests take the same command plus `tests/<file>::<test> -v`. *(Since Task 11: `uv run pytest -q`.)*
 - **Tests stay offline:** no network calls, and they never run the real rclone. Fakes are monkeypatched onto `hpc_gantt`.
 - **Dates and times:** all dates are `Pacific/Auckland`, and end dates are inclusive. A run is **finished** when its end date is before today.
 - **Chart span:** from `first_day = week_monday(today) - 14 days` up to, but not including, `end = week_monday(today) + 91 days`. That's 15 weeks.
@@ -1080,18 +1080,20 @@ Steps 5–7 publish and write to the team's Dropbox. They're done with that appr
   - Expected: neither appears in any blob of `git rev-list --all` or in any commit message, and `TEST` passes.
 - [ ] **Step 5: Publish.**
   - `gh repo create ucgmsim/hpc_gantt_bot --public`, add it as `origin`, then `git push -u origin main`.
-  - Expected: no workflow run starts, because there's no push trigger.
+  - Expected: the push starts one CI run, because `ci.yml` runs on pushes to `main`. It needs no secrets and should pass. The chart workflow doesn't start, because it has no push trigger.
 - [ ] **Step 6: The environment and secrets.**
   - Create the `dropbox` environment with a deployment branch policy allowing only `main`.
   - Set `SHEET_ID` and `DROPBOX_REFRESH_TOKEN` by piping them into `gh secret set --env dropbox`, so they're never printed.
-  - Expected: `gh secret list --env dropbox` shows both names.
+  - Set the repo's default workflow token to read-only *(final review 2)*.
+  - Expected: `gh secret list --env dropbox` shows both names, and `gh api repos/ucgmsim/hpc_gantt_bot/environments/dropbox/deployment-branch-policies --jq '.branch_policies[].name'` lists only `main` *(final review 2)*.
 - [ ] **Step 7: The first run.**
   - `gh workflow run update-chart.yml`, then `gh run watch`.
   - Expected:
     - the run succeeds;
     - its log ends with `Uploaded to dropbox:/QuakeCoRE/hpc_usage_gantt.png` and shows no sheet text and no secret values;
     - `rclone lsl` shows the file's new time;
-    - the downloaded chart looks right.
+    - the downloaded chart looks right;
+    - reading the whole public log, including the step's env block, shows both secret values as `***` *(final review 2)*.
 - [ ] **Step 8: The real share link.** This was Task 7 Step 5, and needs the user's go-ahead. Run `rclone link dropbox:/QuakeCoRE/hpc_usage_gantt.png` and give the link to the user for their Slack `/remind`.
 - [ ] **Step 9: The first scheduled run.** After the next Monday morning, `gh run list --workflow update-chart.yml --event schedule` should show a success.
 

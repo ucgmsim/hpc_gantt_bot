@@ -30,14 +30,14 @@ A small script runs once a week, early on Monday mornings NZ time, as a schedule
 
 ## Goals
 
-- **Always current:** the chart is up to date (at most an hour old) and always at the same link.
+- **Always current:** the chart is up to date (at most a week old, or refreshed on demand with the "Run workflow" button) and always at the same link.
 - **Readable at a glance:**
   - one lane per HPC;
   - one bar per run, labelled with who and what;
   - a "today" line;
   - empty lanes, which show idle machines.
 - **No silent drops:** rows that can't be drawn are listed on the chart itself.
-- **Simple to run:** one uv script, with no Slack token and no state file.
+- **Simple to run:** one script in a small uv project, with no Slack token and no state file.
 
 ## Non-goals
 
@@ -50,7 +50,7 @@ A small script runs once a week, early on Monday mornings NZ time, as a schedule
 - **A chart that silently leaves runs out.** Every row the bot can't draw is listed on the chart.
 - **Misread dates.** The existing typed-date reading stays.
 - **A broken chart replacing a good one.** If the sheet can't be read, nothing is uploaded. The old chart stays, and its "updated" time shows that it's stale.
-- **Secrets in the repo or the sheet.** The Dropbox token lives only in rclone's config.
+- **Secrets in the repo or the sheet.** The Dropbox token lives only in rclone's config and, for the weekly run, in a GitHub environment secret. The sheet's ID is a secret too.
 
 ## The sheet
 
@@ -137,7 +137,7 @@ This replaces the earlier plan of an hourly systemd timer on mantle. On GitHub t
 - **rclone:** installed on the runner from Ubuntu's packages.
   - The remote comes from `RCLONE_CONFIG_DROPBOX_TYPE=dropbox` and `RCLONE_CONFIG_DROPBOX_TOKEN`.
   - rclone refreshes the short-lived access token on each run, and the refreshed copy is thrown away with the runner. This was tested on the laptop on 2026-10-22.
-- **Pinned versions:** uv is pinned to 0.11.28, the version that wrote `hpc_gantt.py.lock`. Actions are pinned to commit SHAs.
+- **Pinned versions:** uv is pinned to 0.11.28, so a new uv release can't change a run. Actions are pinned to the commit SHAs of releases that have been out for a while, e.g. setup-uv v10.2.0 rather than the day-old v10.3.1 *(final review 2)*.
 - **Keep-alive:** GitHub turns off schedules in a public repo after 60 days without a commit. On scheduled runs, a second job re-enables the workflow through GitHub's API. Only that job gets `actions: write`.
 - **Not on GitHub:** the chart itself. It isn't saved as a run artifact; it only goes to Dropbox.
 
