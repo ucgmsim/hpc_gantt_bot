@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import warnings
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -854,7 +855,13 @@ def draw_chart(layout: Layout, updated: datetime, output: Path) -> None:
         color=INK_MUTED,
     )
 
-    fig.savefig(output, dpi=DPI, facecolor=SURFACE)
+    # Characters the font lacks (e.g. CJK, emoji) are drawn as boxes. matplotlib's warning about each one
+    # names the character, and run logs are public, so those warnings are dropped.
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore", message=r"Glyph \d+ .* missing from font", category=UserWarning
+        )
+        fig.savefig(output, dpi=DPI, facecolor=SURFACE)
 
 
 # ---------------------------------------------------------------- upload

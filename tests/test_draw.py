@@ -72,6 +72,27 @@ def test_unicode_and_long_text_draw_without_warnings(tmp_path: Path):
         draw_chart(layout_chart(s, TUE), NOW, tmp_path / "text.png")
 
 
+def test_characters_missing_from_the_font_stay_out_of_the_log(tmp_path: Path):
+    # matplotlib's warning names each character the font lacks, and run logs are public on GitHub
+    s = Schedule(
+        ["Mahuika"],
+        [
+            Run(
+                2,
+                "李明",
+                "地震 runs 🚀",
+                "Mahuika",
+                date(2026, 10, 19),
+                date(2026, 10, 30),
+            )
+        ],
+        [],
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        draw_chart(layout_chart(s, TUE), NOW, tmp_path / "glyphs.png")
+
+
 def test_dollar_signs_draw_literally(tmp_path: Path):
     # "$...$" must not be read as maths: "$RUN_1_2" used to crash the hourly run with a mathtext ValueError
     s = Schedule(
