@@ -6,7 +6,7 @@ Draws the team's **HPC usage plan** (a Google Sheet) as a Gantt chart and upload
 - **Span:** from two weeks back to about three months ahead.
 - **Problems:** any rows in the sheet it couldn't draw are listed under the chart.
 
-It runs once a week on GitHub Actions (see [How it runs](#how-it-runs)) and uploads to `dropbox:/QuakeCoRE/hpc_usage_gantt.png`. A recurring Slack reminder, set up in Slack itself, posts the file's share link. The design is in [docs/superpowers/specs/2026-10-20-hpc-usage-gantt-design.md](docs/superpowers/specs/2026-10-20-hpc-usage-gantt-design.md).
+It runs once a week on GitHub Actions (see [How it runs](#how-it-runs)) and uploads to `dropbox:/QuakeCoRE/hpc_usage_gantt.png`. Every Monday, a workflow set up in Slack itself posts the file's share link, and Slack shows the chart in the message. The design is in [docs/superpowers/specs/2026-10-20-hpc-usage-gantt-design.md](docs/superpowers/specs/2026-10-20-hpc-usage-gantt-design.md).
 
 ## The sheet
 
@@ -46,7 +46,7 @@ uv run pytest
 
 Pull requests and pushes to `main` also run the team's shared checks from [ucgmsim/meta-ci-action](https://github.com/ucgmsim/meta-ci-action): ruff, deptry, npdlint (numpydoc docstrings), pytest and ty.
 
-## The share link and the Slack reminder
+## The share link and the Slack workflow
 
 After the first upload, create a share link, which lets anyone with the link view the chart:
 
@@ -54,7 +54,9 @@ After the first upload, create a share link, which lets anyone with the link vie
 rclone link dropbox:/QuakeCoRE/hpc_usage_gantt.png
 ```
 
-Then, in the Slack channel, type `/remind #channel "HPC usage plan: <link>" every Monday at 9am`. Each upload replaces the file in place, so the link always shows the latest chart.
+The link ends in `dl=0`, which opens Dropbox's page for the file. Change it to `dl=1`, which points at the PNG itself, so that Slack shows the chart in the message instead of only the link.
+
+The Slack post comes from a workflow made in Slack's Workflow Builder. It runs on a schedule, every Monday at 9am, and its only step sends a message with that link to the channel. Each upload replaces the file in place, so the link always shows the latest chart.
 
 ## How it runs
 
